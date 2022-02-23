@@ -1,0 +1,6 @@
+pyscf
+matplotlib
+scipy
+ipykernel
+qiskit-aer
+qiskit
