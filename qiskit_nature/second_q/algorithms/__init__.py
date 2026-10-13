@@ -88,6 +88,9 @@ non-Hermitian (e.g. transcorrelated) Hamiltonians, and its result.
    StatevectorImaginaryMcLachlanPrinciple
    ApproximateMetricPrinciple
    parameter_layers
+   ReferenceStateMitigatedPrinciple
+   OverlapMetricPrinciple
+   parameter_frequencies
    is_hermitian_qubit_operator
 
 A ground state solver which simulates VarQITE with unitary coupled cluster ansätze exactly in the
@@ -142,6 +145,9 @@ from .ground_state_solvers import (
     StatevectorImaginaryMcLachlanPrinciple,
     ApproximateMetricPrinciple,
     parameter_layers,
+    ReferenceStateMitigatedPrinciple,
+    OverlapMetricPrinciple,
+    parameter_frequencies,
     FermionicVarQITESolver,
     is_hermitian_qubit_operator,
     biorthogonal_expectation_value,
@@ -161,6 +167,9 @@ __all__ = [
     "StatevectorImaginaryMcLachlanPrinciple",
     "ApproximateMetricPrinciple",
     "parameter_layers",
+    "ReferenceStateMitigatedPrinciple",
+    "OverlapMetricPrinciple",
+    "parameter_frequencies",
     "FermionicVarQITESolver",
     "is_hermitian_qubit_operator",
     "biorthogonal_expectation_value",

@@ -26,6 +26,8 @@ from .var_qite_minimum_eigensolver import (
 )
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
 from .approximate_metric_principle import ApproximateMetricPrinciple, parameter_layers
+from .reference_state_mitigated_principle import ReferenceStateMitigatedPrinciple
+from .overlap_metric_principle import OverlapMetricPrinciple, parameter_frequencies
 from .fermionic_var_qite_solver import FermionicVarQITESolver
 from .biorthogonal import biorthogonal_expectation_value, transition_circuit
 
@@ -37,6 +39,9 @@ __all__ = [
     "StatevectorImaginaryMcLachlanPrinciple",
     "ApproximateMetricPrinciple",
     "parameter_layers",
+    "ReferenceStateMitigatedPrinciple",
+    "OverlapMetricPrinciple",
+    "parameter_frequencies",
     "FermionicVarQITESolver",
     "biorthogonal_expectation_value",
     "transition_circuit",

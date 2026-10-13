@@ -145,6 +145,9 @@ class ApproximateMetricPrinciple(ImaginaryVariationalPrinciple):
         self._num_updates = 0
         self.num_metric_entries = 0
         self.num_metric_evaluations = 0
+        reset = getattr(self.principle, "reset", None)
+        if callable(reset):
+            reset()  # pylint: disable=not-callable
 
     def metric_tensor(  # type: ignore[override]
         self, ansatz: QuantumCircuit, param_values: Sequence[float]

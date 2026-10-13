@@ -91,6 +91,23 @@ features:
     (2024), without further circuits. Since the stationary points of the equations of motion do
     not depend on the metric, the evolution converges to the same state.
   - |
+    Added the :class:`.ReferenceStateMitigatedPrinciple`, which applies reference-state error
+    mitigation (REM, MREM) to the quantities measured at every VarQITE time step: the noise bias
+    of the gradient (and optionally of the metric) is measured once at a reference state with
+    classically known exact values, e.g. a Hartree-Fock or multireference state prepared by the
+    initial-state part of the ansatz, and subtracted at every step. This reduces the shift of the
+    converged state caused by non-unital noise such as amplitude damping.
+  - |
+    Added the :class:`.OverlapMetricPrinciple`, which measures the VarQITE metric from the overlaps
+    :math:`|\langle\psi(\theta)|\psi(\theta + s)\rangle|^2` of compute-uncompute circuits with a
+    sampler, using exact (generalized) parameter-shift rules for Pauli rotations, controlled
+    rotations, phase gates and Pauli evolutions such as the excitations of a :class:`.UCC` ansatz
+    (see :func:`.parameter_frequencies`). All overlaps of an evaluation are divided by the
+    measured overlap of the unshifted circuit, whose exact value is one. This built-in reference
+    removes the damping of the overlaps by gate noise and readout errors, which makes the metric,
+    and hence the VarQITE trajectory, considerably more accurate than with the LinComb metric in
+    noisy simulations of shallow circuits.
+  - |
     :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
     coefficients of the Pauli representation of the mapped qubit operator (see also
     :func:`.is_hermitian_qubit_operator`). Since estimator-based variational eigensolvers such as

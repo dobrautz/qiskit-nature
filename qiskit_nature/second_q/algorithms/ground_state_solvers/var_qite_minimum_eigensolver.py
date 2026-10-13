@@ -226,8 +226,10 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                         transpiler_options=self.transpiler_options,
                     ),
                 )
-        if isinstance(variational_principle, ApproximateMetricPrinciple):
-            variational_principle.reset()
+        reset = getattr(variational_principle, "reset", None)
+        if callable(reset):
+            # e.g. the ApproximateMetricPrinciple and the ReferenceStateMitigatedPrinciple
+            reset()  # pylint: disable=not-callable
         statevector_principle = _statevector_principle(variational_principle)
 
         # the energy is evaluated as the first auxiliary operator along the trajectory
