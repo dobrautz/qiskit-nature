@@ -1,0 +1,62 @@
+---
+features:
+  - |
+    Added support for non-Hermitian, transcorrelated electronic Hamiltonians, as obtained, for
+    example, from the TCHInt library. :meth:`.FCIDump.from_file` now preserves non-Hermitian
+    integrals: if the ``ST=1`` header entry is present, or if symmetry-related integrals with
+    differing values are encountered, the 2-electron integrals are stored in an
+    :class:`~qiskit_nature.second_q.operators.symmetric_two_body.S1Integrals` container, exploiting
+    only the electron exchange symmetry :math:`(ij|kl) = (kl|ij)`. Likewise, the 1-electron
+    integrals are only symmetrized if this does not contradict the data. :meth:`.FCIDump.to_file`
+    writes such integrals with the ``ST=1`` header entry, and :attr:`.FCIDump.is_hermitian` tells
+    whether the integrals are Hermitian. Approximations without explicit three-body terms, such as
+    the xTC method, are fully described by an FCIDUMP file::
+
+        from qiskit_nature.second_q.formats import fcidump_to_problem
+        from qiskit_nature.second_q.formats.fcidump import FCIDump
+
+        problem = fcidump_to_problem(FCIDump.from_file("FCIDUMP"))
+  - |
+    Added the :class:`~qiskit_nature.second_q.formats.tcdump.TCDump` format, which holds the
+    three-body integrals of transcorrelated Hamiltonians, and the
+    :class:`~qiskit_nature.second_q.operators.three_body_integrals.ThreeBodyIntegrals` container.
+    The latter only stores the symmetry-unique integrals of the 48-fold permutational symmetry of
+    the three-body operator, which is detected automatically. Both the full (``TCDUMP-nosym``) and
+    the symmetry-reduced listing of the integrals are parsed, and symmetry-reduced files are
+    written by default, which reduces their size by up to a factor of 48. The three-body terms are
+    included in the Hamiltonian via the new ``three_body`` attribute of :class:`.ElectronicEnergy`
+    and the ``tcdump`` argument of :func:`.fcidump_to_problem`::
+
+        from qiskit_nature.second_q.formats.tcdump import TCDump
+
+        problem = fcidump_to_problem(FCIDump.from_file("FCIDUMP"), TCDump.from_file("TCDUMP"))
+  - |
+    Added the :class:`.VarQITEMinimumEigensolver`, a minimum eigensolver based on variational
+    quantum imaginary time evolution, which also supports non-Hermitian Hamiltonians. It converges
+    to the right eigenvector whose eigenvalue has the lowest real part. For exact simulations, it
+    uses the new :class:`.StatevectorImaginaryMcLachlanPrinciple`, which propagates the state and
+    all its parameter derivatives through the circuit in a single pass and is orders of magnitude
+    faster than evaluating gradient circuits with estimator primitives.
+  - |
+    :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
+    coefficients of the Pauli representation of the mapped qubit operator (see also
+    :func:`.is_hermitian_qubit_operator`). Since estimator-based variational eigensolvers such as
+    the VQE cannot treat such Hamiltonians, a :class:`.VarQITEMinimumEigensolver` with the ansatz,
+    initial point and estimator of the configured solver is used instead (with a warning). A
+    different solver can be provided via the new ``non_hermitian_solver`` argument.
+fixes:
+  - |
+    Fixed the reconstruction of :attr:`.ElectronicIntegrals.alpha_beta` from
+    :attr:`.ElectronicIntegrals.beta_alpha` and of the beta-spin part of
+    :meth:`.ElectronicEnergy.coulomb`, which assumed Hermitian integrals. This silently turned
+    non-Hermitian unrestricted-spin Hamiltonians into Hermitian ones and caused wrong results of
+    the :class:`.ActiveSpaceTransformer` and the :class:`.FreezeCoreTransformer` for non-Hermitian
+    Hamiltonians. Both transformers now raise an error for Hamiltonians with three-body terms
+    instead of silently dropping them.
+  - |
+    :meth:`.FCIDump.from_file` now supports the ``&End`` terminator of the header, Fortran-style
+    exponents (``1.0D-03``), spaces in the ``ORBSYM`` list and the ``ENUC`` header entry, and
+    raises an error for 6-index entries instead of misinterpreting them.
+  - |
+    :meth:`.ElectronicStructureProblem.interpret` now logs a warning if non-negligible imaginary
+    parts of the computed eigenvalues are discarded.
