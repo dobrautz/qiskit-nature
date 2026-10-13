@@ -18,16 +18,19 @@ from test import QiskitNatureTestCase
 
 import numpy as np
 from ddt import data, ddt
+from qiskit import QuantumCircuit
 from qiskit.circuit.library import efficient_su2
 
 import qiskit_nature.optionals as _optionals
 from qiskit_nature import QiskitNatureError
 from qiskit_nature.second_q.algorithms import FermionicVarQITESolver, VarQITEMinimumEigensolver
-from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
+from qiskit_nature.second_q.circuit.library import HartreeFock, SlaterDeterminant, UCCSD
 from qiskit_nature.second_q.formats import fcidump_to_problem
 from qiskit_nature.second_q.formats.fcidump import FCIDump
 from qiskit_nature.second_q.formats.tcdump import TCDump
+from qiskit_nature.second_q.hamiltonians import TranscorrelatedFermiHubbardModel
 from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper, QubitMapper
+from qiskit_nature.second_q.problems import LatticeModelProblem, LatticeModelResult
 
 DATA = Path(__file__).parents[2] / "formats" / "tcdump"
 
@@ -83,6 +86,38 @@ class TestFermionicVarQITESolver(QiskitNatureTestCase):
         # the UCCSD ansatz is within a few microhartree of the TC-FCI energy of -14.66465358
         self.assertAlmostEqual(result.total_energies[0], -14.66465358, delta=5e-6)
 
+    def test_lattice_model(self):
+        """Test the transcorrelated Hubbard model in the momentum basis."""
+        problem = LatticeModelProblem(
+            TranscorrelatedFermiHubbardModel(4, correlation=-0.73, basis="momentum")
+        )
+        mapper = JordanWignerMapper()
+        ansatz = UCCSD(4, (2, 2), mapper, initial_state=HartreeFock(4, (2, 2), mapper))
+        result = FermionicVarQITESolver(ansatz).solve(problem)
+        self.assertIsInstance(result, LatticeModelResult)
+        self.assertTrue(result.raw_result.converged)
+        # the exact ground-state energy is -2.10274848 (PRR 5, 023174, Fig. 4)
+        self.assertAlmostEqual(result.eigenvalues[0], -2.10274848, delta=2e-4)
+
+    def test_slater_determinant(self):
+        """Test an initial state of delocalized orbitals against the qubit simulation."""
+        problem = LatticeModelProblem(TranscorrelatedFermiHubbardModel(2, correlation=-0.48))
+        orbitals = np.zeros((2, 4))
+        orbitals[0, :2] = [np.cos(0.3), np.sin(0.3)]
+        orbitals[1, 2:] = [np.cos(0.7), -np.sin(0.7)]
+        mapper = JordanWignerMapper()
+        ansatz = UCCSD(2, (1, 1), mapper, initial_state=SlaterDeterminant(orbitals, mapper))
+
+        result = FermionicVarQITESolver(ansatz, time=1.0, convergence_threshold=None).solve(problem)
+        reference = VarQITEMinimumEigensolver(
+            ansatz, time=1.0, convergence_threshold=None
+        ).compute_minimum_eigenvalue(mapper.map(problem.hamiltonian.second_q_op()))
+
+        np.testing.assert_allclose(result.raw_result.energies, reference.energies, atol=1e-12)
+        np.testing.assert_allclose(
+            result.raw_result.optimal_point, reference.optimal_point, atol=1e-12
+        )
+
     def test_unsupported_input(self):
         """Test that unsupported input raises."""
         problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
@@ -92,6 +127,12 @@ class TestFermionicVarQITESolver(QiskitNatureTestCase):
         solver = FermionicVarQITESolver(uccsd(problem, mapper))
         with self.assertRaises(QiskitNatureError):
             solver.solve(problem, {"op": mapper.map(problem.hamiltonian.second_q_op())})
+        # an initial state with the wrong number of particles
+        initial_state = QuantumCircuit(4)
+        initial_state.x(0)
+        ansatz = UCCSD(2, (1, 1), mapper, initial_state=initial_state)
+        with self.assertRaises(QiskitNatureError):
+            FermionicVarQITESolver(ansatz).solve(problem)
 
 
 if __name__ == "__main__":

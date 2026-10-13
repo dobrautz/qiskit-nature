@@ -41,6 +41,7 @@ from qiskit_algorithms.time_evolvers.variational import (
     ImaginaryVariationalPrinciple,
 )
 
+from .approximate_metric_principle import ApproximateMetricPrinciple
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
 
 
@@ -225,6 +226,9 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                         transpiler_options=self.transpiler_options,
                     ),
                 )
+        if isinstance(variational_principle, ApproximateMetricPrinciple):
+            variational_principle.reset()
+        statevector_principle = _statevector_principle(variational_principle)
 
         # the energy is evaluated as the first auxiliary operator along the trajectory
         aux_keys: list[Any] = []
@@ -236,9 +240,9 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             aux_keys = [i for i, op in enumerate(aux_operators) if op is not None]
             aux_list = [op for op in aux_operators if op is not None]
 
-        exact_simulation = isinstance(
-            variational_principle, StatevectorImaginaryMcLachlanPrinciple
-        ) or (isinstance(estimator, StatevectorEstimator) and not estimator.default_precision)
+        exact_simulation = statevector_principle is not None or (
+            isinstance(estimator, StatevectorEstimator) and not estimator.default_precision
+        )
         time = self.time if self.time is not None else (1000.0 if exact_simulation else 10.0)
 
         ode_solver = self.ode_solver
@@ -270,7 +274,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             indices = np.unique(
                 np.linspace(0, num_points - 1, self.num_trajectory_points).astype(int)
             )
-        exact = isinstance(variational_principle, StatevectorImaginaryMcLachlanPrinciple)
+        exact = statevector_principle is not None
         observables_to_evaluate = [operator, *aux_list]
         circuit = self.ansatz
         if self.transpiler is not None and not exact:
@@ -285,10 +289,10 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         for index in indices:
             values = evolution_result.parameter_values[index]
             if exact:
-                state = variational_principle.statevector(self.ansatz, values)
+                state = statevector_principle.statevector(self.ansatz, values)
                 observables.append(
                     [
-                        (_as_value(variational_principle.expectation_value(op, state)), {})
+                        (_as_value(statevector_principle.expectation_value(op, state)), {})
                         for op in observables_to_evaluate
                     ]
                 )
@@ -434,3 +438,14 @@ def _with_tolerances(method: str, rtol: float | None, atol: float | None) -> typ
 def _as_value(value: complex) -> float | complex:
     """Returns a real number if the imaginary part vanishes."""
     return value.real if abs(value.imag) < 1e-14 else value
+
+
+def _statevector_principle(
+    principle: ImaginaryVariationalPrinciple,
+) -> StatevectorImaginaryMcLachlanPrinciple | None:
+    """The (possibly wrapped) exact statevector principle, if any."""
+    if isinstance(principle, ApproximateMetricPrinciple):
+        principle = principle.principle
+    if isinstance(principle, StatevectorImaginaryMcLachlanPrinciple):
+        return principle
+    return None

@@ -54,6 +54,43 @@ features:
     qubits) in a few seconds. The parameters agree with those of the qubit circuit of the
     :class:`.UCC` ansatz.
   - |
+    Added the :class:`.TranscorrelatedFermiHubbardModel`, the Hubbard model of a one-dimensional
+    chain similarity transformed with a Gutzwiller correlator, :math:`e^{-\hat{g}} H e^{\hat{g}}`
+    with :math:`\hat{g} = J \sum_i n_{i\uparrow} n_{i\downarrow}`, in the site basis or, for
+    periodic boundary conditions, in the momentum basis (with three-body terms). It can be solved
+    as a :class:`.LatticeModelProblem`::
+
+        from qiskit_nature.second_q.hamiltonians import TranscorrelatedFermiHubbardModel
+        from qiskit_nature.second_q.problems import LatticeModelProblem
+
+        problem = LatticeModelProblem(
+            TranscorrelatedFermiHubbardModel(6, hopping=1.0, onsite_interaction=4.0,
+                                             correlation=-0.59, basis="momentum")
+        )
+  - |
+    The :class:`.FermionicVarQITESolver` now also solves problems other than
+    :class:`.ElectronicStructureProblem`, e.g. a :class:`.LatticeModelProblem`, supports initial
+    states other than the :class:`.HartreeFock` state (e.g. a :class:`.SlaterDeterminant`) for the
+    :class:`.JordanWignerMapper`, can evolve with the adjoint Hamiltonian (``adjoint=True``) to
+    approximate the left eigenvector, and computes the biorthogonal energy of a left and a right
+    state with :meth:`.FermionicVarQITESolver.biorthogonal_energy`.
+  - |
+    Added :func:`.biorthogonal_expectation_value`, which computes
+    :math:`\langle L|H|R\rangle / \langle L|R\rangle` for a left and a right state of the same
+    ansatz, exactly or with an estimator, and :func:`.transition_circuit`, which prepares the
+    superposition of both states with an ancilla qubit for this measurement. The circuit contains
+    only one controlled rotation per parameterized rotation of the ansatz. The error of the
+    biorthogonal energy of approximate eigenvectors is of second order, but it requires that the
+    left eigenvector, obtained by a VarQITE of :math:`H^\dagger`, is well represented by the
+    ansatz.
+  - |
+    Added the :class:`.ApproximateMetricPrinciple`, which reduces the number of quantum geometric
+    tensor circuits of a VarQITE by evaluating only the block-diagonal (see
+    :func:`.parameter_layers`) or diagonal part of the metric, by reusing it for several time
+    steps, and by updating it with the rank-one qBroyden rule of Fitzek et al., Quantum 8, 1313
+    (2024), without further circuits. Since the stationary points of the equations of motion do
+    not depend on the metric, the evolution converges to the same state.
+  - |
     :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
     coefficients of the Pauli representation of the mapped qubit operator (see also
     :func:`.is_hermitian_qubit_operator`). Since estimator-based variational eigensolvers such as

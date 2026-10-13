@@ -18,11 +18,12 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 import scipy.sparse
-from qiskit.quantum_info import SparsePauliOp
+from qiskit.quantum_info import SparsePauliOp, Statevector
 
 import qiskit_nature.optionals as _optionals
 from qiskit_nature import QiskitNatureError
 from qiskit_nature.second_q.circuit.library import UCC, HartreeFock
+from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.operators import FermionicOp, SparseLabelOp
 from qiskit_nature.second_q.problems import (
     BaseProblem,
@@ -67,10 +68,22 @@ class FermionicVarQITESolver(GroundStateSolver):
     case the evolution converges to the right eigenvector whose eigenvalue has the lowest real
     part.
 
-    The ansatz must be a :class:`.UCC` instance (e.g. :class:`.UCCSD`) with a
-    :class:`.HartreeFock` initial state and without ``include_imaginary``. The Hamiltonian is
+    The ansatz must be a :class:`.UCC` instance (e.g. :class:`.UCCSD`) without
+    ``include_imaginary``. Its initial state is usually the :class:`.HartreeFock` state; other
+    initial states, such as a :class:`.SlaterDeterminant` of delocalized orbitals, are supported
+    for the :class:`.JordanWignerMapper` if they lie in the sector of fixed particle numbers (their
+    statevector is computed once). The Hamiltonian is
     built from ``problem.hamiltonian.second_q_op()`` and stored as a dense matrix of the
-    dimension of the particle-number sector.
+    dimension of the particle-number sector. Besides an :class:`.ElectronicStructureProblem`,
+    any problem whose Hamiltonian is a :class:`.FermionicOp` in the block-ordered spin-orbital
+    basis (spin-up orbitals first) can be solved, e.g. a :class:`.LatticeModelProblem` of a
+    :class:`.TranscorrelatedFermiHubbardModel`; the numbers of orbitals and particles are then
+    taken from the ansatz.
+
+    With ``adjoint=True``, the evolution is performed for the adjoint Hamiltonian
+    :math:`H^\dagger`, which yields an approximation of the left eigenvector of :math:`H`. Together
+    with the right eigenvector, it gives the :meth:`biorthogonal_energy`, whose error is of second
+    order in the errors of the states (see :func:`.biorthogonal_expectation_value`).
     """
 
     # pylint: disable=too-many-positional-arguments
@@ -84,6 +97,7 @@ class FermionicVarQITESolver(GroundStateSolver):
         convergence_threshold: float | None = 1e-6,
         lse_solver: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
         num_trajectory_points: int | None = 200,
+        adjoint: bool = False,
     ) -> None:
         """
         Args:
@@ -101,6 +115,8 @@ class FermionicVarQITESolver(GroundStateSolver):
             num_trajectory_points: The maximal number of time points at which the energy along
                 the trajectory is recorded (always including the final one). If ``None``, it is
                 recorded at all time points.
+            adjoint: Whether to evolve with the adjoint Hamiltonian :math:`H^\\dagger` to obtain
+                the left eigenvector. The recorded energies are then those of :math:`H^\\dagger`.
 
         Raises:
             QiskitNatureError: If the ansatz is not a :class:`.UCC` instance.
@@ -115,6 +131,7 @@ class FermionicVarQITESolver(GroundStateSolver):
         self.convergence_threshold = convergence_threshold
         self.lse_solver = lse_solver
         self.num_trajectory_points = num_trajectory_points
+        self.adjoint = adjoint
 
     @property
     def solver(self) -> None:
@@ -140,26 +157,22 @@ class FermionicVarQITESolver(GroundStateSolver):
         """Computes the ground state.
 
         Args:
-            problem: The electronic structure problem.
+            problem: The problem, e.g. an :class:`.ElectronicStructureProblem` or a
+                :class:`.LatticeModelProblem`.
             aux_operators: Not supported.
 
         Raises:
             QiskitNatureError: If the problem, the ansatz or ``aux_operators`` are not supported.
 
         Returns:
-            An interpreted :class:`.ElectronicStructureResult`.
+            The result interpreted by the problem, e.g. an :class:`.ElectronicStructureResult`.
         """
         if aux_operators:
             raise QiskitNatureError("Auxiliary operators are not supported by this solver.")
-        if not isinstance(problem, ElectronicStructureProblem):
-            raise QiskitNatureError("Only ElectronicStructureProblem instances are supported.")
-        norb = problem.num_spatial_orbitals
-        num_alpha, num_beta = problem.num_particles
-        nelec = (num_alpha, num_beta)
+        norb, nelec, hamiltonian = self._sector_hamiltonian(problem)
+        if self.adjoint:
+            hamiltonian = hamiltonian.conj().T
         generators = self._generators(norb, nelec)
-        hamiltonian = _sector_matrix(problem.hamiltonian.second_q_op(), norb, nelec)
-
-        import ffsim  # pylint: disable=import-error
 
         num_params = self.ansatz.num_parameters
         values = (
@@ -167,12 +180,11 @@ class FermionicVarQITESolver(GroundStateSolver):
             if self.initial_point is None
             else np.asarray(self.initial_point, dtype=float)
         )
-        reference = ffsim.hartree_fock_state(norb, nelec)
+        reference = self._reference_state(norb, nelec)
         lse_solver = self.lse_solver if self.lse_solver is not None else _lstsq
 
         times = [0.0]
         parameter_values = [values.copy()]
-        energies = [np.vdot(reference, hamiltonian @ reference)]
         converged = False
         time = 0.0
         while time < self.time:
@@ -226,6 +238,57 @@ class FermionicVarQITESolver(GroundStateSolver):
         raw_result.optimal_circuit = self.ansatz
         return problem.interpret(EigenstateResult.from_result(raw_result))
 
+    @_optionals.HAS_FFSIM.require_in_call
+    def biorthogonal_energy(
+        self,
+        problem: BaseProblem,
+        left_point: Sequence[float],
+        right_point: Sequence[float],
+    ) -> complex:
+        r"""Computes the biorthogonal energy :math:`\langle L|H|R\rangle / \langle L|R\rangle`.
+
+        Args:
+            problem: The problem.
+            left_point: The parameter values of the left state, e.g. the optimal point of a
+                solver with ``adjoint=True``.
+            right_point: The parameter values of the right state.
+
+        Raises:
+            QiskitNatureError: If the left and right states are orthogonal.
+
+        Returns:
+            The biorthogonal energy (without constant energy offsets of the problem).
+        """
+        norb, nelec, hamiltonian = self._sector_hamiltonian(problem)
+        generators = self._generators(norb, nelec)
+        reference = self._reference_state(norb, nelec)
+        left, right = (
+            _states_and_derivatives(
+                generators, np.asarray(point, dtype=float), reference, derivatives=False
+            )[0]
+            for point in (left_point, right_point)
+        )
+        overlap = np.vdot(left, right)
+        if abs(overlap) < 1e-12:
+            raise QiskitNatureError("The left and right states are orthogonal.")
+        return complex(np.vdot(left, hamiltonian @ right) / overlap)
+
+    def _sector_hamiltonian(self, problem: BaseProblem) -> tuple[int, tuple[int, int], np.ndarray]:
+        """The numbers of orbitals and particles and the Hamiltonian matrix in the sector."""
+        if isinstance(problem, ElectronicStructureProblem):
+            norb = problem.num_spatial_orbitals
+            num_alpha, num_beta = problem.num_particles
+        else:
+            norb = self.ansatz.num_spatial_orbitals
+            num_alpha, num_beta = self.ansatz.num_particles
+        nelec = (num_alpha, num_beta)
+        operator = problem.hamiltonian.second_q_op()
+        if not isinstance(operator, FermionicOp) or operator.register_length != 2 * norb:
+            raise QiskitNatureError(
+                f"The Hamiltonian must be a FermionicOp of {2 * norb} spin orbitals."
+            )
+        return norb, nelec, _sector_matrix(operator, norb, nelec)
+
     def _generators(self, norb: int, nelec: tuple[int, int]) -> list[scipy.sparse.csr_matrix]:
         """The sector matrices of the generators exp(theta (T - T^dagger)), in parameter order."""
         ansatz = self.ansatz
@@ -233,8 +296,6 @@ class FermionicVarQITESolver(GroundStateSolver):
             raise QiskitNatureError("The ansatz must be a UCC instance.")
         if getattr(ansatz, "_include_imaginary", False):
             raise QiskitNatureError("UCC ansätze with include_imaginary=True are not supported.")
-        if not isinstance(ansatz.initial_state, HartreeFock):
-            raise QiskitNatureError("The ansatz must have a HartreeFock initial state.")
         if ansatz.num_spatial_orbitals != norb or tuple(ansatz.num_particles) != nelec:
             raise QiskitNatureError(
                 "The numbers of orbitals and particles of the ansatz and the problem differ."
@@ -259,6 +320,29 @@ class FermionicVarQITESolver(GroundStateSolver):
         if reps * len(generators) != ansatz.num_parameters:
             raise QiskitNatureError("The parameters of the ansatz do not match its excitations.")
         return generators * reps
+
+    def _reference_state(self, norb: int, nelec: tuple[int, int]) -> np.ndarray:
+        """The initial state of the ansatz in the sector of fixed particle numbers."""
+        import ffsim  # pylint: disable=import-error
+
+        initial_state = self.ansatz.initial_state
+        if isinstance(initial_state, HartreeFock):
+            return ffsim.hartree_fock_state(norb, nelec)
+        if initial_state is None or not isinstance(self.ansatz.qubit_mapper, JordanWignerMapper):
+            raise QiskitNatureError(
+                "The ansatz must have a HartreeFock initial state or, for the "
+                "JordanWignerMapper, an initial state circuit."
+            )
+        # ffsim orders the spin orbitals as the Jordan-Wigner mapping of qiskit-nature (spin-up
+        # orbitals first), such that the conversion only selects the amplitudes of the sector
+        reference = ffsim.qiskit.qiskit_vec_to_ffsim_vec(
+            Statevector(initial_state).data, norb, nelec
+        )
+        if abs(np.vdot(reference, reference) - 1) > 1e-8:
+            raise QiskitNatureError(
+                f"The initial state does not lie in the sector of {nelec} particles."
+            )
+        return reference
 
 
 def _sector_matrix(operator: FermionicOp, norb: int, nelec: tuple[int, int]) -> np.ndarray:

@@ -86,6 +86,8 @@ non-Hermitian (e.g. transcorrelated) Hamiltonians, and its result.
    VarQITEMinimumEigensolver
    VarQITEMinimumEigensolverResult
    StatevectorImaginaryMcLachlanPrinciple
+   ApproximateMetricPrinciple
+   parameter_layers
    is_hermitian_qubit_operator
 
 A ground state solver which simulates VarQITE with unitary coupled cluster ansätze exactly in the
@@ -96,6 +98,17 @@ sector of fixed particle numbers (requires ``ffsim``).
    :nosignatures:
 
    FermionicVarQITESolver
+
+Biorthogonal expectation values of non-Hermitian operators, e.g. the energy
+:math:`\\langle L|H|R\\rangle / \\langle L|R\\rangle` of approximate left and right eigenvectors, and the
+circuit for measuring them.
+
+.. autosummary::
+   :toctree: ../stubs/
+   :nosignatures:
+
+   biorthogonal_expectation_value
+   transition_circuit
 
 Initial Points
 ++++++++++++++
@@ -127,8 +140,12 @@ from .ground_state_solvers import (
     VarQITEMinimumEigensolver,
     VarQITEMinimumEigensolverResult,
     StatevectorImaginaryMcLachlanPrinciple,
+    ApproximateMetricPrinciple,
+    parameter_layers,
     FermionicVarQITESolver,
     is_hermitian_qubit_operator,
+    biorthogonal_expectation_value,
+    transition_circuit,
 )
 
 __all__ = [
@@ -142,6 +159,10 @@ __all__ = [
     "VarQITEMinimumEigensolver",
     "VarQITEMinimumEigensolverResult",
     "StatevectorImaginaryMcLachlanPrinciple",
+    "ApproximateMetricPrinciple",
+    "parameter_layers",
     "FermionicVarQITESolver",
     "is_hermitian_qubit_operator",
+    "biorthogonal_expectation_value",
+    "transition_circuit",
 ]
