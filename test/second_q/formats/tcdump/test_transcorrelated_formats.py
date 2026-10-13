@@ -217,8 +217,17 @@ class TestTranscorrelatedFCIDump(QiskitNatureTestCase):
         self.assertFalse(fcidump.is_hermitian)
 
     def test_missing_tcdump_warns(self):
-        """Test that omitting the TCDUMP of a full transcorrelated Hamiltonian warns."""
+        """Test that omitting the TCDUMP of a full transcorrelated Hamiltonian warns if the
+        three-body terms contribute, i.e. for at least three electrons."""
+        content = (DATA / "be_sto6g_tc.fcidump").read_text(encoding="utf8")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "FCIDUMP"
+            path.write_text(content.replace("ISYM=1,", "ISYM=1, III=1,"), encoding="utf8")
+            fcidump = FCIDump.from_file(path)
+        self.assertEqual(fcidump.metadata["III"], 1)
         with self.assertLogs("qiskit_nature", level="WARNING"):
+            fcidump_to_problem(fcidump)
+        with self.assertNoLogs("qiskit_nature", level="WARNING"):
             fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
 
     def test_six_index_entries_raise(self):

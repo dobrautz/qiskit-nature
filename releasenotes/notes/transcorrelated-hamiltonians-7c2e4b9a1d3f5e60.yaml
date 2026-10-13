@@ -33,10 +33,23 @@ features:
   - |
     Added the :class:`.VarQITEMinimumEigensolver`, a minimum eigensolver based on variational
     quantum imaginary time evolution, which also supports non-Hermitian Hamiltonians. It converges
-    to the right eigenvector whose eigenvalue has the lowest real part. For exact simulations, it
+    to the right eigenvector whose eigenvalue has the lowest real part. By default, the equations
+    of motion are integrated with forward Euler steps of ``timestep=0.05`` until the norm of the
+    parameter derivative falls below ``convergence_threshold=1e-6`` (see
+    :attr:`.VarQITEMinimumEigensolverResult.converged`), which is robust also for ansätze with
+    nearly singular metric tensors, such as hardware-efficient ones. For exact simulations, it
     uses the new :class:`.StatevectorImaginaryMcLachlanPrinciple`, which propagates the state and
     all its parameter derivatives through the circuit in a single pass and is orders of magnitude
-    faster than evaluating gradient circuits with estimator primitives.
+    faster than evaluating gradient circuits with estimator primitives. For estimators with shot
+    noise, a regularized solution of the linear system (singular value cutoff of ``1e-2``) and a
+    fixed evolution time are used by default.
+  - |
+    Added the :class:`.FermionicVarQITESolver`, which simulates the VarQITE of unitary coupled
+    cluster ansätze exactly in the sector of fixed particle numbers using the optional `ffsim
+    <https://github.com/qiskit-community/ffsim>`_ library. Since this sector is much smaller than
+    the qubit Hilbert space, larger systems can be treated, e.g. H2 in the cc-pVDZ basis (20
+    qubits) in a few seconds. The parameters agree with those of the qubit circuit of the
+    :class:`.UCC` ansatz.
   - |
     :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
     coefficients of the Pauli representation of the mapped qubit operator (see also

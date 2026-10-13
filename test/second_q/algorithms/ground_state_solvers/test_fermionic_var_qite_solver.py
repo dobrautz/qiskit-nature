@@ -1,0 +1,97 @@
+# This code is part of a Qiskit project.
+#
+# (C) Copyright IBM 2026.
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+"""Test the FermionicVarQITESolver."""
+
+import unittest
+from pathlib import Path
+from test import QiskitNatureTestCase
+
+import numpy as np
+from ddt import data, ddt
+from qiskit.circuit.library import efficient_su2
+
+import qiskit_nature.optionals as _optionals
+from qiskit_nature import QiskitNatureError
+from qiskit_nature.second_q.algorithms import FermionicVarQITESolver, VarQITEMinimumEigensolver
+from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
+from qiskit_nature.second_q.formats import fcidump_to_problem
+from qiskit_nature.second_q.formats.fcidump import FCIDump
+from qiskit_nature.second_q.formats.tcdump import TCDump
+from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
+
+DATA = Path(__file__).parents[2] / "formats" / "tcdump"
+
+
+def uccsd(problem, mapper):
+    """The UCCSD ansatz with a Hartree-Fock initial state."""
+    norb, nelec = problem.num_spatial_orbitals, problem.num_particles
+    return UCCSD(norb, nelec, mapper, initial_state=HartreeFock(norb, nelec, mapper))
+
+
+@ddt
+@unittest.skipUnless(_optionals.HAS_FFSIM, "ffsim not available.")
+class TestFermionicVarQITESolver(QiskitNatureTestCase):
+    """Test the FermionicVarQITESolver."""
+
+    @data("jordan_wigner", "parity")
+    def test_agrees_with_qubit_simulation(self, mapper_name):
+        """Test that the trajectory agrees with the simulation of the qubit circuit."""
+        problem = fcidump_to_problem(
+            FCIDump.from_file(DATA / "lih_4nos_tc.fcidump"),
+            TCDump.from_file(DATA / "lih_4nos_tc.tcdump"),
+        )
+        if mapper_name == "parity":
+            mapper = ParityMapper(num_particles=problem.num_particles)
+        else:
+            mapper = JordanWignerMapper()
+        ansatz = uccsd(problem, mapper)
+
+        result = FermionicVarQITESolver(ansatz, time=2.0, convergence_threshold=None).solve(problem)
+        reference = VarQITEMinimumEigensolver(
+            ansatz, time=2.0, convergence_threshold=None
+        ).compute_minimum_eigenvalue(mapper.map(problem.hamiltonian.second_q_op()))
+
+        np.testing.assert_allclose(result.raw_result.times, reference.times)
+        np.testing.assert_allclose(result.raw_result.energies, reference.energies, atol=1e-12)
+        np.testing.assert_allclose(
+            result.raw_result.optimal_point, reference.optimal_point, atol=1e-12
+        )
+        self.assertAlmostEqual(
+            result.total_energies[0],
+            reference.eigenvalue + problem.hamiltonian.nuclear_repulsion_energy,
+        )
+
+    def test_three_body(self):
+        """Test the transcorrelated Be Hamiltonian with three-body terms."""
+        problem = fcidump_to_problem(
+            FCIDump.from_file(DATA / "be_sto6g_tc.fcidump"),
+            TCDump.from_file(DATA / "be_sto6g_tc.tcdump"),
+        )
+        result = FermionicVarQITESolver(uccsd(problem, JordanWignerMapper())).solve(problem)
+        self.assertTrue(result.raw_result.converged)
+        # the UCCSD ansatz is within a few microhartree of the TC-FCI energy of -14.66465358
+        self.assertAlmostEqual(result.total_energies[0], -14.66465358, delta=5e-6)
+
+    def test_unsupported_input(self):
+        """Test that unsupported input raises."""
+        problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
+        with self.assertRaises(QiskitNatureError):
+            FermionicVarQITESolver(efficient_su2(4))
+        mapper = JordanWignerMapper()
+        solver = FermionicVarQITESolver(uccsd(problem, mapper))
+        with self.assertRaises(QiskitNatureError):
+            solver.solve(problem, {"op": mapper.map(problem.hamiltonian.second_q_op())})
+
+
+if __name__ == "__main__":
+    unittest.main()

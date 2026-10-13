@@ -113,6 +113,15 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         self.assertIsInstance(result.raw_result, VarQITEMinimumEigensolverResult)
         self.assertAlmostEqual(result.total_energies[0], H2_TC_ENERGY, delta=1e-5)
 
+    def test_shot_based_var_qite(self):
+        """Test the VarQITE with an estimator subject to shot noise."""
+        estimator = StatevectorEstimator(default_precision=1e-3, seed=7)
+        result = VarQITEMinimumEigensolver(
+            self.ansatz, time=3.0, estimator=estimator, convergence_threshold=None
+        ).compute_minimum_eigenvalue(self.mapper.map(self.problem.hamiltonian.second_q_op()))
+        energy = result.eigenvalue + self.problem.hamiltonian.nuclear_repulsion_energy
+        self.assertAlmostEqual(energy, H2_TC_ENERGY, delta=5e-3)
+
     def test_unsupported_solver_raises(self):
         """Test that a solver without support for non-Hermitian operators raises."""
         solver = GroundStateEigensolver(self.mapper, _MinimumEigensolverWithoutAnsatz())

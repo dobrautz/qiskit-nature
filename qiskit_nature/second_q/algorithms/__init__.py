@@ -88,6 +88,15 @@ non-Hermitian (e.g. transcorrelated) Hamiltonians, and its result.
    StatevectorImaginaryMcLachlanPrinciple
    is_hermitian_qubit_operator
 
+A ground state solver which simulates VarQITE with unitary coupled cluster ansätze exactly in the
+sector of fixed particle numbers (requires ``ffsim``).
+
+.. autosummary::
+   :toctree: ../stubs/
+   :nosignatures:
+
+   FermionicVarQITESolver
+
 Initial Points
 ++++++++++++++
 When using variational algorithms such as the :class:`~qiskit_algorithms.VQE`
@@ -118,6 +127,7 @@ from .ground_state_solvers import (
     VarQITEMinimumEigensolver,
     VarQITEMinimumEigensolverResult,
     StatevectorImaginaryMcLachlanPrinciple,
+    FermionicVarQITESolver,
     is_hermitian_qubit_operator,
 )
 
@@ -132,5 +142,6 @@ __all__ = [
     "VarQITEMinimumEigensolver",
     "VarQITEMinimumEigensolverResult",
     "StatevectorImaginaryMcLachlanPrinciple",
+    "FermionicVarQITESolver",
     "is_hermitian_qubit_operator",
 ]

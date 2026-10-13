@@ -25,6 +25,7 @@ from .var_qite_minimum_eigensolver import (
     VarQITEMinimumEigensolverResult,
 )
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
+from .fermionic_var_qite_solver import FermionicVarQITESolver
 
 __all__ = [
     "GroundStateSolver",
@@ -32,5 +33,6 @@ __all__ = [
     "VarQITEMinimumEigensolver",
     "VarQITEMinimumEigensolverResult",
     "StatevectorImaginaryMcLachlanPrinciple",
+    "FermionicVarQITESolver",
     "is_hermitian_qubit_operator",
 ]

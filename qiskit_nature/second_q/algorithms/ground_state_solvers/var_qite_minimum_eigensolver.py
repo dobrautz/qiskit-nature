@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 import scipy.integrate
 from scipy.integrate import OdeSolver
+from scipy.integrate._ivp.base import ConstantDenseOutput
 
 from qiskit import QuantumCircuit
 from qiskit.primitives import BaseEstimatorV2, StatevectorEstimator
@@ -33,6 +34,7 @@ from qiskit_algorithms import (
     VariationalResult,
 )
 from qiskit_algorithms.gradients import LinCombEstimatorGradient, LinCombQGT
+from qiskit_algorithms.observables_evaluator import estimate_observables
 from qiskit_algorithms.time_evolvers.variational import (
     ImaginaryMcLachlanPrinciple,
     ImaginaryVariationalPrinciple,
@@ -106,14 +108,17 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         ansatz: QuantumCircuit,
         initial_point: Sequence[float] | None = None,
         *,
-        time: float = 10.0,
+        time: float | None = None,
+        timestep: float = 0.05,
+        convergence_threshold: float | None = 1e-6,
         estimator: BaseEstimatorV2 | None = None,
         variational_principle: ImaginaryVariationalPrinciple | None = None,
-        ode_solver: type[OdeSolver] | str = "RK45",
+        ode_solver: type[OdeSolver] | str | None = None,
         lse_solver: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
         num_timesteps: int | None = None,
         rtol: float | None = 1e-8,
         atol: float | None = 1e-10,
+        num_trajectory_points: int | None = 200,
     ) -> None:
         """
         Args:
@@ -121,7 +126,14 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             initial_point: The initial parameter values. If ``None``, all parameters are
                 initialized to zero, which, for example, corresponds to the reference state of
                 unitary coupled cluster ansätze.
-            time: The total imaginary time of the evolution.
+            time: The maximal imaginary time of the evolution. If ``None``, it is ``1000`` for
+                exact simulations, which typically stop much earlier because the parameters
+                converge, and ``10`` otherwise, since shot noise prevents the convergence of the
+                parameters.
+            timestep: The imaginary time step of the default forward Euler integration.
+            convergence_threshold: The default forward Euler integration stops once the norm of
+                the parameter derivative :math:`\\|\\dot{\\theta}\\|` falls below this threshold. If
+                ``None``, the evolution always proceeds until ``time``.
             estimator: The estimator used to evaluate the expectation values. If ``None``, a
                 :class:`~qiskit.primitives.StatevectorEstimator` is used.
             variational_principle: The variational principle. If ``None`` and the evolution is
@@ -132,21 +144,30 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                 :class:`~qiskit_algorithms.time_evolvers.variational.ImaginaryMcLachlanPrinciple`
                 is used, whose gradients and quantum geometric tensor are evaluated with
                 ``estimator`` (if provided).
-            ode_solver: The ODE solver, see :class:`~qiskit_algorithms.VarQITE`. Defaults to the
-                adaptive ``"RK45"`` method.
+            ode_solver: The ODE solver, see :class:`~qiskit_algorithms.VarQITE`. If ``None``, a
+                forward Euler integration with the given ``timestep`` and
+                ``convergence_threshold`` is used.
             lse_solver: The solver of the linear system of equations, see
-                :class:`~qiskit_algorithms.VarQITE`.
-            num_timesteps: The number of time steps of the forward Euler solver, see
-                :class:`~qiskit_algorithms.VarQITE`.
+                :class:`~qiskit_algorithms.VarQITE`. If ``None``, ``numpy.linalg.lstsq`` is used
+                with a relative cutoff for the singular values of ``1e-7`` for exact simulations
+                and of ``1e-2`` otherwise, which prevents the amplification of shot noise.
+            num_timesteps: The number of time steps of the
+                :class:`~qiskit_algorithms.time_evolvers.variational.ForwardEulerSolver`, if it is
+                given as ``ode_solver``, see :class:`~qiskit_algorithms.VarQITE`.
             rtol: The relative tolerance of the adaptive ODE solver, if ``ode_solver`` is the
                 name of a SciPy method. Note that, for non-Hermitian Hamiltonians, the error of
                 the expectation value is of first order in the error of the state, which requires
                 tighter tolerances than the SciPy defaults. If ``None``, the SciPy default is used.
             atol: The absolute tolerance of the adaptive ODE solver, see ``rtol``.
+            num_trajectory_points: The maximal number of time points at which the observables
+                along the trajectory are evaluated (always including the final one). If ``None``,
+                they are evaluated at all time points.
         """
         self.ansatz = ansatz
         self.initial_point = initial_point
         self.time = time
+        self.timestep = timestep
+        self.convergence_threshold = convergence_threshold
         self.estimator = estimator
         self.variational_principle = variational_principle
         self.ode_solver = ode_solver
@@ -154,6 +175,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         self.num_timesteps = num_timesteps
         self.rtol = rtol
         self.atol = atol
+        self.num_trajectory_points = num_trajectory_points
 
     @classmethod
     def supports_aux_operators(cls) -> bool:
@@ -192,9 +214,20 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             aux_keys = [i for i, op in enumerate(aux_operators) if op is not None]
             aux_list = [op for op in aux_operators if op is not None]
 
+        exact_simulation = isinstance(
+            variational_principle, StatevectorImaginaryMcLachlanPrinciple
+        ) or (isinstance(estimator, StatevectorEstimator) and not estimator.default_precision)
+        time = self.time if self.time is not None else (1000.0 if exact_simulation else 10.0)
+
         ode_solver = self.ode_solver
-        if isinstance(ode_solver, str) and (self.rtol is not None or self.atol is not None):
+        if ode_solver is None:
+            ode_solver = _converging_euler_solver(self.timestep, self.convergence_threshold)
+        elif isinstance(ode_solver, str) and (self.rtol is not None or self.atol is not None):
             ode_solver = _with_tolerances(ode_solver, self.rtol, self.atol)
+        lse_solver = self.lse_solver
+        if lse_solver is None:
+            # a strong regularization is required to prevent the amplification of shot noise
+            lse_solver = _lstsq if exact_simulation else _lstsq_regularized
 
         var_qite = VarQITE(
             self.ansatz,
@@ -202,40 +235,58 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             variational_principle,
             estimator,
             ode_solver=ode_solver,
-            lse_solver=self.lse_solver,
+            lse_solver=lse_solver,
             num_timesteps=self.num_timesteps,
         )
-        exact = isinstance(variational_principle, StatevectorImaginaryMcLachlanPrinciple)
-        evolution_result = var_qite.evolve(
-            TimeEvolutionProblem(
-                operator, self.time, aux_operators=None if exact else [operator, *aux_list]
+        evolution_result = var_qite.evolve(TimeEvolutionProblem(operator, time))
+
+        # evaluate the observables at (a subset of) the time points of the trajectory
+        num_points = len(evolution_result.times)
+        if self.num_trajectory_points is None or num_points <= self.num_trajectory_points:
+            indices = np.arange(num_points)
+        else:
+            indices = np.unique(
+                np.linspace(0, num_points - 1, self.num_trajectory_points).astype(int)
             )
-        )
-        if exact:
-            # evaluate the observables with the fast statevector simulation
-            observables = []
-            for values in evolution_result.parameter_values:
+        exact = isinstance(variational_principle, StatevectorImaginaryMcLachlanPrinciple)
+        observables_to_evaluate = [operator, *aux_list]
+        if self.ansatz.layout is not None:
+            # VarQITE applies the layout of a transpiled ansatz to the Hamiltonian, too
+            observables_to_evaluate = [
+                op.apply_layout(self.ansatz.layout) for op in observables_to_evaluate
+            ]
+        observables = []
+        for index in indices:
+            values = evolution_result.parameter_values[index]
+            if exact:
                 state = variational_principle.statevector(self.ansatz, values)
                 observables.append(
                     [
                         (_as_value(variational_principle.expectation_value(op, state)), {})
-                        for op in [operator, *aux_list]
+                        for op in observables_to_evaluate
                     ]
                 )
-            evolution_result.observables = observables
-            evolution_result.aux_ops_evaluated = observables[-1]
+            else:
+                observables.append(
+                    estimate_observables(estimator, self.ansatz, observables_to_evaluate, values)
+                )
+        evolution_result.observables = observables
+        evolution_result.aux_ops_evaluated = observables[-1]
 
         result = VarQITEMinimumEigensolverResult()
         result.evolution_result = evolution_result
-        result.energies = np.asarray([values[0][0] for values in evolution_result.observables])
-        result.times = np.asarray(evolution_result.times)
+        result.energies = np.asarray([values[0][0] for values in observables])
+        result.times = np.asarray(evolution_result.times)[indices]
+        result.converged = self.ode_solver is None and bool(
+            evolution_result.times[-1] < time * (1 - 1e-12)
+        )
         result.eigenvalue = result.energies[-1]
         result.optimal_value = float(np.real(result.eigenvalue))
         result.optimal_point = np.asarray(evolution_result.parameter_values[-1])
         result.optimal_parameters = dict(zip(self.ansatz.parameters, result.optimal_point))
         result.optimal_circuit = self.ansatz
 
-        final_values = evolution_result.observables[-1][1:]
+        final_values = observables[-1][1:]
         if isinstance(aux_operators, dict):
             result.aux_operators_evaluated = dict(zip(aux_keys, final_values))
         elif aux_operators is not None:
@@ -255,6 +306,17 @@ class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResul
         self._energies: np.ndarray | None = None
         self._times: np.ndarray | None = None
         self._evolution_result: VarQTEResult | None = None
+        self._converged: bool = False
+
+    @property
+    def converged(self) -> bool:
+        """Whether the default forward Euler integration stopped because the convergence
+        threshold was reached (before the maximal imaginary time)."""
+        return self._converged
+
+    @converged.setter
+    def converged(self, converged: bool) -> None:
+        self._converged = converged
 
     @property
     def energies(self) -> np.ndarray | None:
@@ -282,6 +344,48 @@ class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResul
     @evolution_result.setter
     def evolution_result(self, evolution_result: VarQTEResult) -> None:
         self._evolution_result = evolution_result
+
+
+def _lstsq(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    """Solves the linear system in the least-squares sense with a relative singular value cutoff
+    of 1e-7."""
+    return np.linalg.lstsq(matrix, rhs, rcond=1e-7)[0]
+
+
+def _lstsq_regularized(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    """Solves the linear system in the least-squares sense with a relative singular value cutoff
+    of 1e-2, suitable for matrices and right-hand sides subject to shot noise."""
+    return np.linalg.lstsq(matrix, rhs, rcond=1e-2)[0]
+
+
+def _converging_euler_solver(timestep: float, threshold: float | None) -> type[OdeSolver]:
+    """Returns a forward Euler ODE solver class with a fixed time step, which finishes once the norm
+    of the derivative falls below the given threshold."""
+
+    class _ConvergingEulerSolver(OdeSolver):
+        # pylint: disable=too-few-public-methods
+        def __init__(self, fun, t0, y0, t_bound, vectorized=False, **kwargs):
+            # pylint: disable=unused-argument
+            super().__init__(fun, t0, y0, t_bound, vectorized, support_complex=False)
+            self._y_old = None
+
+        def _step_impl(self):
+            remaining = self.t_bound - self.t
+            # avoid a tiny final step due to floating-point accumulation
+            step = remaining if remaining < timestep * (1 + 1e-9) else timestep
+            derivative = np.asarray(self.fun(self.t, self.y))
+            self._y_old = self.y
+            self.y = self.y + step * derivative
+            self.t = self.t + step
+            if threshold is not None and np.linalg.norm(derivative) < threshold:
+                # converged: finish the integration at the current time
+                self.t_bound = self.t
+            return True, None
+
+        def _dense_output_impl(self):
+            return ConstantDenseOutput(self.t_old, self.t, self._y_old)
+
+    return _ConvergingEulerSolver
 
 
 def _with_tolerances(method: str, rtol: float | None, atol: float | None) -> type[OdeSolver]:

@@ -56,7 +56,7 @@ def fcidump_to_problem(
     Returns:
         An :class:`.ElectronicStructureProblem` instance.
     """
-    if tcdump is None and fcidump.metadata.get("III", 0) == 1:
+    if tcdump is None and fcidump.metadata.get("III", 0) == 1 and fcidump.num_electrons >= 3:
         LOGGER.warning(
             "The FCIDump header indicates explicit three-body integrals (III=1), but no TCDump was "
             "provided. The three-body terms of the Hamiltonian are omitted."

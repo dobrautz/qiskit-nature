@@ -172,12 +172,30 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
             2, problem.num_particles, mapper, initial_state=HartreeFock(2, (1, 1), mapper)
         )
         hamiltonian = mapper.map(problem.hamiltonian.second_q_op())
-        result = VarQITEMinimumEigensolver(ansatz, time=10.0).compute_minimum_eigenvalue(
+        constant = problem.hamiltonian.nuclear_repulsion_energy
+
+        # default: forward Euler steps until the parameters converge
+        result = VarQITEMinimumEigensolver(ansatz).compute_minimum_eigenvalue(
             hamiltonian, {"hamiltonian": hamiltonian}
         )
-        energy = result.eigenvalue + problem.hamiltonian.nuclear_repulsion_energy
-        self.assertAlmostEqual(energy, -1.1717073880, places=7)
+        self.assertTrue(result.converged)
+        self.assertLess(result.times[-1], 1000.0)
+        self.assertAlmostEqual(result.eigenvalue + constant, -1.1717073880, delta=1e-6)
         self.assertAlmostEqual(result.aux_operators_evaluated["hamiltonian"][0], result.eigenvalue)
+
+        # a tighter convergence threshold
+        result = VarQITEMinimumEigensolver(
+            ansatz, convergence_threshold=1e-9
+        ).compute_minimum_eigenvalue(hamiltonian)
+        self.assertAlmostEqual(result.eigenvalue + constant, -1.1717073880, places=8)
+
+        # an adaptive ODE solver up to a fixed imaginary time
+        result = VarQITEMinimumEigensolver(
+            ansatz, time=10.0, ode_solver="RK45"
+        ).compute_minimum_eigenvalue(hamiltonian)
+        self.assertFalse(result.converged)
+        self.assertAlmostEqual(result.times[-1], 10.0)
+        self.assertAlmostEqual(result.eigenvalue + constant, -1.1717073880, places=7)
 
 
 if __name__ == "__main__":

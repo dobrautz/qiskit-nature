@@ -76,6 +76,12 @@ HAS_PSI4 = NatureLazySubprocessTester(
     msg="See https://psicode.org",
 )
 
+HAS_FFSIM = LazyImportTester(
+    "ffsim",
+    name="ffsim",
+    install="pip install ffsim",
+)
+
 HAS_SPARSE = LazyImportTester(
     "sparse",
     name="sparse",
