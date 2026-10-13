@@ -16,7 +16,10 @@ import unittest
 from pathlib import Path
 from test import QiskitNatureTestCase
 
+import numpy as np
+from qiskit import generate_preset_pass_manager
 from qiskit.primitives import StatevectorEstimator
+from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_algorithms import (
     MinimumEigensolver,
@@ -121,6 +124,26 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         ).compute_minimum_eigenvalue(self.mapper.map(self.problem.hamiltonian.second_q_op()))
         energy = result.eigenvalue + self.problem.hamiltonian.nuclear_repulsion_energy
         self.assertAlmostEqual(energy, H2_TC_ENERGY, delta=5e-3)
+
+    def test_var_qite_with_transpiler(self):
+        """Test the VarQITE with circuits transpiled for a backend with a non-trivial layout."""
+        backend = GenericBackendV2(num_qubits=4, coupling_map=[[0, 3], [3, 2], [2, 1]], seed=3)
+        pass_manager = generate_preset_pass_manager(
+            backend=backend, optimization_level=1, seed_transpiler=5
+        )
+        # the circuits are not placed on the physical qubits [0, 1]
+        self.assertNotEqual(pass_manager.run(self.ansatz).layout.final_index_layout(), [0, 1])
+        hamiltonian = self.mapper.map(self.problem.hamiltonian.second_q_op())
+        kwargs = {"time": 0.5, "convergence_threshold": None}
+        reference = VarQITEMinimumEigensolver(self.ansatz, **kwargs).compute_minimum_eigenvalue(
+            hamiltonian
+        )
+        estimator = StatevectorEstimator(default_precision=1e-5, seed=3)
+        result = VarQITEMinimumEigensolver(
+            self.ansatz, estimator=estimator, transpiler=pass_manager, **kwargs
+        ).compute_minimum_eigenvalue(hamiltonian)
+        np.testing.assert_allclose(result.optimal_point, reference.optimal_point, atol=1e-3)
+        self.assertAlmostEqual(result.eigenvalue, reference.eigenvalue, delta=1e-3)
 
     def test_unsupported_solver_raises(self):
         """Test that a solver without support for non-Hermitian operators raises."""

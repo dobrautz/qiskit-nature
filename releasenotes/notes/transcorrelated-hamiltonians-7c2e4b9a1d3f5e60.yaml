@@ -42,7 +42,10 @@ features:
     all its parameter derivatives through the circuit in a single pass and is orders of magnitude
     faster than evaluating gradient circuits with estimator primitives. For estimators with shot
     noise, a regularized solution of the linear system (singular value cutoff of ``1e-2``) and a
-    fixed evolution time are used by default.
+    fixed evolution time are used by default. The ``transpiler`` argument compiles the gradient,
+    quantum geometric tensor and observable circuits for the backend of the estimator, which
+    enables the use of simulators (e.g. those of Qiskit Aer, including noisy and matrix product
+    state simulations) and of hardware backends via Qiskit IBM Runtime.
   - |
     Added the :class:`.FermionicVarQITESolver`, which simulates the VarQITE of unitary coupled
     cluster ansätze exactly in the sector of fixed particle numbers using the optional `ffsim

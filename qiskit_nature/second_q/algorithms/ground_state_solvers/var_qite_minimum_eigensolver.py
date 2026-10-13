@@ -35,6 +35,7 @@ from qiskit_algorithms import (
 )
 from qiskit_algorithms.gradients import LinCombEstimatorGradient, LinCombQGT
 from qiskit_algorithms.observables_evaluator import estimate_observables
+from qiskit_algorithms.custom_types import Transpiler
 from qiskit_algorithms.time_evolvers.variational import (
     ImaginaryMcLachlanPrinciple,
     ImaginaryVariationalPrinciple,
@@ -119,6 +120,8 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         rtol: float | None = 1e-8,
         atol: float | None = 1e-10,
         num_trajectory_points: int | None = 200,
+        transpiler: Transpiler | None = None,
+        transpiler_options: dict[str, Any] | None = None,
     ) -> None:
         """
         Args:
@@ -162,6 +165,14 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             num_trajectory_points: The maximal number of time points at which the observables
                 along the trajectory are evaluated (always including the final one). If ``None``,
                 they are evaluated at all time points.
+            transpiler: An optional object with a ``run`` method (e.g. a pass manager), which
+                transpiles the circuits evaluated by ``estimator`` for its backend, as required by
+                the V2 primitives of hardware backends and simulators. It is applied to the gradient
+                and quantum geometric tensor circuits of the default variational principle (which
+                contain an additional ancilla qubit) and to the ansatz for the evaluation of the
+                observables, whose layout is taken into account. The evolution itself operates on
+                the logical ``ansatz``.
+            transpiler_options: Keyword arguments passed to the ``run`` method of ``transpiler``.
         """
         self.ansatz = ansatz
         self.initial_point = initial_point
@@ -176,6 +187,8 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         self.rtol = rtol
         self.atol = atol
         self.num_trajectory_points = num_trajectory_points
+        self.transpiler = transpiler
+        self.transpiler_options = transpiler_options
 
     @classmethod
     def supports_aux_operators(cls) -> bool:
@@ -197,11 +210,20 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             exact = isinstance(estimator, StatevectorEstimator) and not estimator.default_precision
             if exact and StatevectorImaginaryMcLachlanPrinciple.supports(self.ansatz):
                 variational_principle = StatevectorImaginaryMcLachlanPrinciple()
-            elif self.estimator is None:
+            elif self.estimator is None and self.transpiler is None:
                 variational_principle = ImaginaryMcLachlanPrinciple()
             else:
                 variational_principle = ImaginaryMcLachlanPrinciple(
-                    LinCombQGT(self.estimator), LinCombEstimatorGradient(self.estimator)
+                    LinCombQGT(
+                        estimator,
+                        transpiler=self.transpiler,
+                        transpiler_options=self.transpiler_options,
+                    ),
+                    LinCombEstimatorGradient(
+                        estimator,
+                        transpiler=self.transpiler,
+                        transpiler_options=self.transpiler_options,
+                    ),
                 )
 
         # the energy is evaluated as the first auxiliary operator along the trajectory
@@ -250,10 +272,14 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             )
         exact = isinstance(variational_principle, StatevectorImaginaryMcLachlanPrinciple)
         observables_to_evaluate = [operator, *aux_list]
-        if self.ansatz.layout is not None:
-            # VarQITE applies the layout of a transpiled ansatz to the Hamiltonian, too
+        circuit = self.ansatz
+        if self.transpiler is not None and not exact:
+            circuit = self.transpiler.run(self.ansatz, **(self.transpiler_options or {}))
+        if circuit.layout is not None:
+            # take the layout of a transpiled ansatz into account (as VarQITE does for the
+            # Hamiltonian)
             observables_to_evaluate = [
-                op.apply_layout(self.ansatz.layout) for op in observables_to_evaluate
+                op.apply_layout(circuit.layout) for op in observables_to_evaluate
             ]
         observables: list[list[tuple[Any, dict[str, Any]]]] = []
         for index in indices:
@@ -268,7 +294,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                 )
             else:
                 observables.append(
-                    estimate_observables(estimator, self.ansatz, observables_to_evaluate, values)
+                    estimate_observables(estimator, circuit, observables_to_evaluate, values)
                 )
         evolution_result.observables = observables
         evolution_result.aux_ops_evaluated = observables[-1]
