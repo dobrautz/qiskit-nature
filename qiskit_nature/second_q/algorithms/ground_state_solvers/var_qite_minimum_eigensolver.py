@@ -255,7 +255,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             observables_to_evaluate = [
                 op.apply_layout(self.ansatz.layout) for op in observables_to_evaluate
             ]
-        observables = []
+        observables: list[list[tuple[Any, dict[str, Any]]]] = []
         for index in indices:
             values = evolution_result.parameter_values[index]
             if exact:

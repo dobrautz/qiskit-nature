@@ -363,7 +363,7 @@ def _build_two_body_beta_alpha(
             raise QiskitNatureError(
                 f"Unknown 2-electron integral indices encountered in '{(i, a, j, b)}'"
             )
-        eri[index] = x  # type: ignore[index]
+        eri[index] = x  # type: ignore[assignment]
     if hermitian:
         return eri  # type: ignore[return-value]
     return S1Integrals(eri)

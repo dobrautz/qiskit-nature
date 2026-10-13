@@ -272,7 +272,7 @@ class ElectronicIntegrals(LinearMixin):
             return PolynomialTensor({"++--": two_body_ba.conjugate()}, validate=False)
 
         # physicist' order: <pq|rs>_ab = <qp|sr>_ba
-        alpha_beta = cast(Tensor, np.transpose(two_body_ba, (1, 0, 3, 2)))
+        alpha_beta = np.transpose(two_body_ba, (1, 0, 3, 2))
         return PolynomialTensor({"++--": alpha_beta}, validate=False)
 
     @property

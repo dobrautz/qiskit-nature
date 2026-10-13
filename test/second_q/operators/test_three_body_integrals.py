@@ -29,14 +29,14 @@ from qiskit_nature.second_q.operators.three_body_integrals import (
 def symmetric_three_body_tensor(norb: int, seed: int = 0) -> np.ndarray:
     """A random three-body tensor with the 48-fold permutational symmetry."""
     tensor = np.random.default_rng(seed).normal(size=(norb,) * 6)
-    return sum(tensor.transpose(perm) for perm in S48_PERMUTATIONS) / len(S48_PERMUTATIONS)
+    return np.mean([tensor.transpose(perm) for perm in S48_PERMUTATIONS], axis=0)
 
 
 def reference_operator(tensor: np.ndarray) -> FermionicOp:
     """The operator 1/2 sum L_pqrstu a+_p a+_q a+_r a_u a_t a_s summed over all indices and spins."""
     # pylint: disable=invalid-name
     norb = tensor.shape[0]
-    data = {}
+    data: dict[str, float] = {}
     for index in itertools.product(range(norb), repeat=6):
         value = tensor[index]
         if value == 0.0:

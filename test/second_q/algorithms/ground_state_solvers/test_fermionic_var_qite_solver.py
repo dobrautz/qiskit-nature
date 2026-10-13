@@ -27,7 +27,7 @@ from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
 from qiskit_nature.second_q.formats import fcidump_to_problem
 from qiskit_nature.second_q.formats.fcidump import FCIDump
 from qiskit_nature.second_q.formats.tcdump import TCDump
-from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
+from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper, QubitMapper
 
 DATA = Path(__file__).parents[2] / "formats" / "tcdump"
 
@@ -50,6 +50,7 @@ class TestFermionicVarQITESolver(QiskitNatureTestCase):
             FCIDump.from_file(DATA / "lih_4nos_tc.fcidump"),
             TCDump.from_file(DATA / "lih_4nos_tc.tcdump"),
         )
+        mapper: QubitMapper
         if mapper_name == "parity":
             mapper = ParityMapper(num_particles=problem.num_particles)
         else:

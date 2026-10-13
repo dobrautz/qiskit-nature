@@ -154,7 +154,8 @@ class FermionicVarQITESolver(GroundStateSolver):
         if not isinstance(problem, ElectronicStructureProblem):
             raise QiskitNatureError("Only ElectronicStructureProblem instances are supported.")
         norb = problem.num_spatial_orbitals
-        nelec = tuple(problem.num_particles)
+        num_alpha, num_beta = problem.num_particles
+        nelec = (num_alpha, num_beta)
         generators = self._generators(norb, nelec)
         hamiltonian = _sector_matrix(problem.hamiltonian.second_q_op(), norb, nelec)
 
@@ -264,14 +265,12 @@ def _sector_matrix(operator: FermionicOp, norb: int, nelec: tuple[int, int]) -> 
     """The dense matrix of a fermionic operator in the sector of fixed particle numbers."""
     import ffsim  # pylint: disable=import-error
 
-    terms = {}
+    terms: dict[tuple[tuple[bool, bool, int], ...], complex] = {}
     for label, coeff in operator.items():
-        key = []
-        for token in label.split():
-            action, index = token.split("_")
-            index = int(index)
-            key.append((action == "+", index >= norb, index % norb))
-        key = tuple(key)
+        key = tuple(
+            (action == "+", int(index) >= norb, int(index) % norb)
+            for action, index in (token.split("_") for token in label.split())
+        )
         terms[key] = terms.get(key, 0.0) + complex(coeff)
     linear_operator = ffsim.linear_operator(ffsim.FermionOperator(terms), norb=norb, nelec=nelec)
     dim = linear_operator.shape[0]
