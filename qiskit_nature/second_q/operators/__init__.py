@@ -41,6 +41,7 @@ Modules
 
    tensor_ordering
    symmetric_two_body
+   three_body_integrals
    commutators
 """
 

@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2021, 2025.
+# (C) Copyright IBM 2021, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -21,6 +21,7 @@ import numpy as np
 
 import qiskit_nature  # pylint: disable=unused-import
 from qiskit_nature.second_q.operators import ElectronicIntegrals, FermionicOp, PolynomialTensor
+from qiskit_nature.second_q.operators.three_body_integrals import ThreeBodyIntegrals
 
 from .hamiltonian import Hamiltonian
 
@@ -89,9 +90,24 @@ class ElectronicEnergy(Hamiltonian):
         # be careful, the following overwrites the hamiltonian.nuclear_repulsion_energy value
         hamiltonian.constants["nuclear_repulsion_energy"] = 10.0
 
+    Finally, the Hamiltonian may contain a spin-independent three-body term, as it arises for
+    example in the transcorrelated method, stored in a
+    :class:`~qiskit_nature.second_q.operators.three_body_integrals.ThreeBodyIntegrals` container
+    (see also :class:`~qiskit_nature.second_q.formats.tcdump.TCDump`). Note that transcorrelated
+    Hamiltonians are not Hermitian, which is supported by the integral containers, the
+    construction of the second-quantized operator and the qubit mappers.
+
+    .. code-block:: python
+
+        three_body: ThreeBodyIntegrals = ...
+
+        hamiltonian = ElectronicEnergy(integrals, three_body=three_body)
+
     Attributes:
         electronic_integrals: The :class:`qiskit_nature.second_q.operators.ElectronicIntegrals`.
         constants: A mapping of constant energy offsets, not mapped to the qubit operator.
+        three_body: The optional
+            :class:`~qiskit_nature.second_q.operators.three_body_integrals.ThreeBodyIntegrals`.
     """
 
     def __init__(
@@ -99,17 +115,22 @@ class ElectronicEnergy(Hamiltonian):
         electronic_integrals: ElectronicIntegrals,
         *,
         constants: MutableMapping[str, float] = None,
+        three_body: ThreeBodyIntegrals | None = None,
     ) -> None:
         """
         Args:
             electronic_integrals: The container with the one- and two-body coefficients.
             constants: A mapping of constant energy offsets.
+            three_body: The container with the (spin-independent) three-body coefficients.
         """
         self.electronic_integrals = electronic_integrals
         self.constants = constants if constants is not None else {}
+        self.three_body = three_body
 
     @property
     def register_length(self) -> int | None:
+        if self.electronic_integrals.register_length is None and self.three_body is not None:
+            return self.three_body.num_orbitals
         return self.electronic_integrals.register_length
 
     @property
@@ -151,6 +172,7 @@ class ElectronicEnergy(Hamiltonian):
         *,
         validate: bool = True,
         auto_index_order: bool = True,
+        three_body: ThreeBodyIntegrals | None = None,
     ) -> ElectronicEnergy:
         """Constructs a hamiltonian instance from raw integrals.
 
@@ -167,6 +189,7 @@ class ElectronicEnergy(Hamiltonian):
             validate: whether or not to validate the coefficient matrices.
             auto_index_order: whether or not to automatically convert the matrices to physicists'
                 order.
+            three_body: the (spin-independent) three-body coefficients.
 
         Returns:
             The resulting ``ElectronicEnergy`` instance.
@@ -180,7 +203,8 @@ class ElectronicEnergy(Hamiltonian):
                 h2_ba,
                 validate=validate,
                 auto_index_order=auto_index_order,
-            )
+            ),
+            three_body=three_body,
         )
 
     def second_q_op(self) -> FermionicOp:
@@ -189,7 +213,12 @@ class ElectronicEnergy(Hamiltonian):
         Returns:
             A ``FermionicOp`` instance.
         """
-        return FermionicOp.from_polynomial_tensor(self.electronic_integrals.second_q_coeffs())
+        second_q_op = FermionicOp.from_polynomial_tensor(
+            self.electronic_integrals.second_q_coeffs()
+        )
+        if self.three_body is not None:
+            second_q_op += self.three_body.second_q_op()
+        return second_q_op
 
     def interpret(
         self, result: "qiskit_nature.second_q.problems.EigenstateResult"  # type: ignore[name-defined]
@@ -240,7 +269,9 @@ class ElectronicEnergy(Hamiltonian):
             coulomb.alpha += PolynomialTensor.einsum(
                 {einsum: ("++--", "+-", "+-")}, beta_alpha, density.beta
             )
-            einsum = einsum[2:4] + einsum[:2] + einsum[4:]
+            # contract the alpha-spin electron of the beta-alpha integrals; this ordering of the
+            # indices is also correct for non-Hermitian integrals
+            einsum = f"{''.join(two_body_aa._reverse_label_template('qpsr'))},ps->qr"
             coulomb.beta += PolynomialTensor.einsum(
                 {einsum: ("++--", "+-", "+-")}, beta_alpha, density.alpha
             )

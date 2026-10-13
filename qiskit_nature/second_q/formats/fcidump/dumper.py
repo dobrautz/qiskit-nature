@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2020, 2023.
+# (C) Copyright IBM 2020, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -24,20 +24,37 @@ def _dump_1e_ints(
     beta: bool = False,
 ) -> None:
     idx_offset = 1 if not beta else 1 + len(mos)
+    # the parser only symmetrizes the matrix if it is symmetric, so non-symmetric matrices are
+    # written in full
+    symmetric = np.allclose(hij, np.transpose(hij), rtol=0.0, atol=1e-10)
     hij_elements = set()
     for i, j in itertools.product(mos, repeat=2):
         if i == j:
             _write_to_outfile(outfile, hij[i][j], (i + idx_offset, j + idx_offset, 0, 0))
             continue
-        if (j, i) in hij_elements and np.isclose(hij[i][j], hij[j][i]):
+        if symmetric and (j, i) in hij_elements and np.isclose(hij[i][j], hij[j][i]):
             continue
         _write_to_outfile(outfile, hij[i][j], (i + idx_offset, j + idx_offset, 0, 0))
         hij_elements.add((i, j))
 
 
 def _dump_2e_ints(
-    hijkl: np.ndarray, mos: Union[range, List[int]], outfile: TextIO, beta: int = 0
+    hijkl: np.ndarray,
+    mos: Union[range, List[int]],
+    outfile: TextIO,
+    beta: int = 0,
+    exchange_only: bool = False,
 ) -> None:
+    """Writes the 2-electron integrals.
+
+    Args:
+        hijkl: the 2-electron integrals in chemist' order.
+        mos: the orbital indices.
+        outfile: the file to write to.
+        beta: ``0`` for alpha-alpha, ``1`` for alpha-beta and ``2`` for beta-beta integrals.
+        exchange_only: if ``True``, only the electron exchange symmetry ``(ij|kl) = (kl|ij)`` of
+            non-Hermitian integrals is exploited to reduce the number of written entries.
+    """
     idx_offsets = [1, 1]
     for b in range(beta):
         idx_offsets[1 - b] += len(mos)
@@ -46,6 +63,21 @@ def _dump_2e_ints(
     hijkl_elements = set()
     for elem in itertools.product(mos, repeat=4):
         if np.isclose(hijkl[elem], 0.0, atol=1e-14):
+            continue
+        if exchange_only:
+            # the mixed-spin integrals do not have any symmetry within their block
+            partner = elem[2:] + elem[:2]
+            if beta != 1 and partner in hijkl_elements and np.isclose(hijkl[elem], hijkl[partner]):
+                continue
+            _write_to_outfile(
+                outfile,
+                hijkl[elem],
+                (
+                    *[e + idx_offsets[0] for e in elem[:2]],
+                    *[e + idx_offsets[1] for e in elem[2:]],
+                ),
+            )
+            hijkl_elements.add(elem)
             continue
         if len(set(elem)) == 1:
             _write_to_outfile(

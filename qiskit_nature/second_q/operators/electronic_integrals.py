@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2022, 2025.
+# (C) Copyright IBM 2022, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -26,7 +26,7 @@ from qiskit_nature.exceptions import QiskitNatureError
 import qiskit_nature.optionals as _optionals
 
 from .polynomial_tensor import PolynomialTensor
-from .symmetric_two_body import SymmetricTwoBodyIntegrals
+from .symmetric_two_body import S1Integrals, SymmetricTwoBodyIntegrals
 from .tensor import Tensor
 from .tensor_ordering import (
     IndexType,
@@ -253,19 +253,26 @@ class ElectronicIntegrals(LinearMixin):
     def alpha_beta(self) -> PolynomialTensor:
         """The alpha-beta-spin two-body electronic integrals.
 
-        These get reconstructed from :attr:`beta_alpha` by transposing in the physicist' ordering
-        convention.
+        These get reconstructed from :attr:`beta_alpha` by exchanging the two electrons, which is
+        valid for Hermitian as well as non-Hermitian (e.g. transcorrelated) integrals.
         """
         if self.beta_alpha.is_empty():
             return self.beta_alpha
 
         two_body_ba = self.beta_alpha["++--"]
+        if isinstance(two_body_ba, S1Integrals):
+            # chemist' order: (ij|kl)_ab = (kl|ij)_ba
+            return PolynomialTensor(
+                {"++--": S1Integrals(two_body_ba.array.transpose((2, 3, 0, 1)))}, validate=False
+            )
         if isinstance(two_body_ba, SymmetricTwoBodyIntegrals):
             # NOTE: to ensure proper inter-operability with the symmetry-aware integral containers,
-            # we delegate the conjugation to the objects themselves
+            # we delegate the transposition to the objects themselves. For the 4- and 8-fold
+            # symmetric containers, this exchanges the two electrons.
             return PolynomialTensor({"++--": two_body_ba.conjugate()}, validate=False)
 
-        alpha_beta = cast(Tensor, np.moveaxis(two_body_ba, (0, 1), (2, 3)))
+        # physicist' order: <pq|rs>_ab = <qp|sr>_ba
+        alpha_beta = cast(Tensor, np.transpose(two_body_ba, (1, 0, 3, 2)))
         return PolynomialTensor({"++--": alpha_beta}, validate=False)
 
     @property

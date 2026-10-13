@@ -135,7 +135,7 @@ class TestElectronicIntegrals(QiskitNatureTestCase):
         with self.subTest("alpha_beta property"):
             ints = ElectronicIntegrals(self.alpha, self.beta, self.beta_alpha)
             alpha_beta = PolynomialTensor(
-                {"++--": np.einsum("ijkl->klij", self.build_matrix(4, 4, 0.5))}
+                {"++--": np.einsum("ijkl->jilk", self.build_matrix(4, 4, 0.5))}
             )
             self.assertTrue(ints.alpha_beta.equiv(alpha_beta))
 
@@ -148,7 +148,7 @@ class TestElectronicIntegrals(QiskitNatureTestCase):
                     beta_alpha=PolynomialTensor({"++--": beta_alpha}), validate=False
                 )
                 alpha_beta = PolynomialTensor(
-                    {"++--": np.einsum("ijkl->klij", beta_alpha.todense())}
+                    {"++--": np.einsum("ijkl->jilk", beta_alpha.todense())}
                 )
                 self.assertTrue(ints.alpha_beta.equiv(alpha_beta))
 
@@ -453,7 +453,7 @@ class TestElectronicIntegrals(QiskitNatureTestCase):
             two_body += np.kron(two_kron, two_body_ba)
             two_kron[(1, 0, 0, 1)] = 0.0
             two_kron[(0, 1, 1, 0)] = 0.5
-            two_body += np.kron(two_kron, np.einsum("ijkl->klij", two_body_ba))
+            two_body += np.kron(two_kron, np.einsum("ijkl->jilk", two_body_ba))
             two_kron[(0, 1, 1, 0)] = 0.0
             expected["++--"] = two_body
             self.assertTrue(tensor.equiv(PolynomialTensor(expected)))
@@ -512,7 +512,7 @@ class TestElectronicIntegrals(QiskitNatureTestCase):
                     "++--": two_body_aa
                     + two_body_bb
                     + two_body_ba
-                    + np.einsum("ijkl->klij", two_body_ba),
+                    + np.einsum("ijkl->jilk", two_body_ba),
                 }
             )
             self.assertTrue(tensor.equiv(expected))
