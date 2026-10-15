@@ -1,0 +1,33 @@
+---
+features:
+  - |
+    The :class:`.VarQITEMinimumEigensolver` and the :class:`.FermionicVarQITESolver` can integrate
+    the VarQITE equations of motion with far fewer steps than the default forward Euler steps:
+
+    * ``line_search=True`` shortens every Euler step of at most ``timestep`` (default ``1.0``)
+      until the energy decreases sufficiently (Armijo condition) and grows it again after accepted
+      steps. This requires a Hermitian Hamiltonian and costs one energy evaluation per trial.
+    * ``implicit=True`` takes semi-implicit (Galerkin backward Euler) steps
+      :math:`(A + hK)\,d = C` of size ``timestep`` (default ``5.0``), with the Hamiltonian in the
+      tangent space :math:`K_{ij} = \mathrm{Re}\langle T_i|H - E|T_j\rangle`, also for
+      non-Hermitian Hamiltonians. The generator is shifted by the lowest Ritz value of
+      :math:`H - E` in the tangent space if it is negative, which keeps :math:`A + hK` positive
+      definite for any step size (the shift caps the effective step at
+      :math:`h / (1 - hg) < 1/|g|`, and the Ritz value is the smallest shift with this property),
+      and every step is restricted to a maximal Fubini-Study length ``trust_region`` (default
+      ``0.2``). Large implicit steps then act like Gauss-Newton steps. This requires the
+      :class:`.StatevectorImaginaryMcLachlanPrinciple`, whose new method
+      :meth:`~.StatevectorImaginaryMcLachlanPrinciple.tangent_hamiltonian` computes :math:`K`.
+    * ``trust_region`` alone restricts the Fubini-Study length of the Euler steps.
+
+    For example, UCCSD for square H4 (STO-6G) converges in 24 implicit steps or 94 line-search
+    steps instead of 1952 Euler steps, and the transcorrelated Hubbard chain of 6 sites (momentum
+    basis) in 7 implicit steps instead of 79::
+
+        from qiskit_nature.second_q.algorithms import VarQITEMinimumEigensolver
+
+        solver = VarQITEMinimumEigensolver(ansatz, implicit=True)
+        result = solver.compute_minimum_eigenvalue(hamiltonian)
+
+    The ``timestep`` argument of both solvers now defaults to ``None``, which keeps the previous
+    default of ``0.05`` for the forward Euler integration.

@@ -24,6 +24,7 @@ from scipy.integrate._ivp.base import ConstantDenseOutput
 
 from qiskit import QuantumCircuit
 from qiskit.primitives import BaseEstimatorV2, StatevectorEstimator
+from qiskit.quantum_info import SparsePauliOp
 from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit_algorithms import (
     MinimumEigensolver,
@@ -41,8 +42,11 @@ from qiskit_algorithms.time_evolvers.variational import (
     ImaginaryVariationalPrinciple,
 )
 
+from qiskit_nature import QiskitNatureError
+
 from .approximate_metric_principle import ApproximateMetricPrinciple
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
+from .var_qite_integration import integrate, step_options
 
 
 class VarQITEMinimumEigensolver(MinimumEigensolver):
@@ -67,6 +71,19 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
     The returned eigenvalue is the expectation value :math:`\langle\psi(\tau)|H|\psi(\tau)\rangle`
     at the final imaginary time, which is complex for non-Hermitian Hamiltonians. The energies
     along the trajectory are available through :attr:`.VarQITEMinimumEigensolverResult.energies`.
+
+    Besides the default forward Euler steps, two integration schemes reduce the number of steps
+    considerably. With ``line_search=True``, every Euler step of at most ``timestep`` is shortened
+    until the energy decreases sufficiently and grows again after accepted steps (Hermitian
+    Hamiltonians only; this costs one energy evaluation per trial). With ``implicit=True``, the
+    semi-implicit Galerkin steps :math:`(A + hK)\,d = C` of the backward Euler method are taken,
+    where :math:`K_{ij} = \mathrm{Re}\langle T_i|H - E|T_j\rangle` is the Hamiltonian in the tangent
+    space (:meth:`.StatevectorImaginaryMcLachlanPrinciple.tangent_hamiltonian`; exact simulations
+    only). The generator is shifted by the lowest Ritz value of :math:`H - E` in the tangent space
+    (if negative), which keeps :math:`A + hK` positive definite for any step size and is obtained
+    from :math:`A` and :math:`K` alone, and every step is restricted to a maximal Fubini-Study
+    length (``trust_region``). Large implicit steps then act like Gauss-Newton steps and typically
+    converge in a few tens of steps, also for non-Hermitian Hamiltonians.
 
     .. code-block:: python
 
@@ -111,8 +128,11 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         initial_point: Sequence[float] | None = None,
         *,
         time: float | None = None,
-        timestep: float = 0.05,
+        timestep: float | None = None,
         convergence_threshold: float | None = 1e-6,
+        implicit: bool = False,
+        line_search: bool = False,
+        trust_region: float | None = None,
         estimator: BaseEstimatorV2 | None = None,
         variational_principle: ImaginaryVariationalPrinciple | None = None,
         ode_solver: type[OdeSolver] | str | None = None,
@@ -134,10 +154,27 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                 exact simulations, which typically stop much earlier because the parameters
                 converge, and ``10`` otherwise, since shot noise prevents the convergence of the
                 parameters.
-            timestep: The imaginary time step of the default forward Euler integration.
-            convergence_threshold: The default forward Euler integration stops once the norm of
-                the parameter derivative :math:`\\|\\dot{\\theta}\\|` falls below this threshold. If
-                ``None``, the evolution always proceeds until ``time``.
+            timestep: The imaginary time step: of the default forward Euler integration (default
+                ``0.05``), the maximal one with ``line_search=True`` (default ``1.0``), or that of
+                the implicit steps (default ``5.0``).
+            convergence_threshold: The default forward Euler integration (and the line-search
+                and implicit integrations) stops once the norm of the parameter derivative
+                :math:`\\|\\dot{\\theta}\\|` falls below this threshold. If ``None``, the evolution
+                always proceeds until ``time``.
+            implicit: Whether to integrate with shifted semi-implicit (Galerkin backward Euler)
+                steps instead of forward Euler steps. This requires the
+                :class:`.StatevectorImaginaryMcLachlanPrinciple` (exact simulations) and replaces
+                ``ode_solver``.
+            line_search: Whether to shorten every (explicit or implicit) step until the energy
+                decreases sufficiently (Armijo condition; the step is halved up to seven times)
+                and to grow it by a factor of ``1.5`` after accepted steps, up to ``timestep``.
+                Only for Hermitian Hamiltonians, whose energy decreases monotonically along the
+                exact evolution. Replaces ``ode_solver``. Note that, for ansätze with several
+                local energy minima, any change of the steps can lead to a different minimum.
+            trust_region: The maximal Fubini-Study length :math:`h\\sqrt{d^T A d}` of a step
+                (:math:`d` the parameter derivative), beyond which it is shortened. If ``None``, it
+                is ``0.2`` for implicit steps and unrestricted otherwise; use ``numpy.inf`` to
+                disable it for implicit steps. Replaces ``ode_solver``.
             estimator: The estimator used to evaluate the expectation values. If ``None``, a
                 :class:`~qiskit.primitives.StatevectorEstimator` is used.
             variational_principle: The variational principle. If ``None`` and the evolution is
@@ -180,6 +217,9 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         self.time = time
         self.timestep = timestep
         self.convergence_threshold = convergence_threshold
+        self.implicit = implicit
+        self.line_search = line_search
+        self.trust_region = trust_region
         self.estimator = estimator
         self.variational_principle = variational_principle
         self.ode_solver = ode_solver
@@ -247,26 +287,36 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         )
         time = self.time if self.time is not None else (1000.0 if exact_simulation else 10.0)
 
-        ode_solver = self.ode_solver
-        if ode_solver is None:
-            ode_solver = _converging_euler_solver(self.timestep, self.convergence_threshold)
-        elif isinstance(ode_solver, str) and (self.rtol is not None or self.atol is not None):
-            ode_solver = _with_tolerances(ode_solver, self.rtol, self.atol)
         lse_solver = self.lse_solver
         if lse_solver is None:
             # a strong regularization is required to prevent the amplification of shot noise
             lse_solver = _lstsq if exact_simulation else _lstsq_regularized
 
-        var_qite = VarQITE(
-            self.ansatz,
-            initial_point,
-            variational_principle,
-            estimator,
-            ode_solver=ode_solver,
-            lse_solver=lse_solver,
-            num_timesteps=self.num_timesteps,
-        )
-        evolution_result = var_qite.evolve(TimeEvolutionProblem(operator, time))
+        if self.implicit or self.line_search or self.trust_region is not None:
+            evolution_result, converged = self._step_integration(
+                operator, initial_point, time, variational_principle, estimator, lse_solver
+            )
+        else:
+            ode_solver = self.ode_solver
+            if ode_solver is None:
+                timestep = self.timestep if self.timestep is not None else 0.05
+                ode_solver = _converging_euler_solver(timestep, self.convergence_threshold)
+            elif isinstance(ode_solver, str) and (self.rtol is not None or self.atol is not None):
+                ode_solver = _with_tolerances(ode_solver, self.rtol, self.atol)
+
+            var_qite = VarQITE(
+                self.ansatz,
+                initial_point,
+                variational_principle,
+                estimator,
+                ode_solver=ode_solver,
+                lse_solver=lse_solver,
+                num_timesteps=self.num_timesteps,
+            )
+            evolution_result = var_qite.evolve(TimeEvolutionProblem(operator, time))
+            converged = self.ode_solver is None and bool(
+                evolution_result.times[-1] < time * (1 - 1e-12)
+            )
 
         # evaluate the observables at (a subset of) the time points of the trajectory
         num_points = len(evolution_result.times)
@@ -309,9 +359,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         result.evolution_result = evolution_result
         result.energies = np.asarray([values[0][0] for values in observables])
         result.times = np.asarray(evolution_result.times)[indices]
-        result.converged = self.ode_solver is None and bool(
-            evolution_result.times[-1] < time * (1 - 1e-12)
-        )
+        result.converged = converged
         result.eigenvalue = result.energies[-1]
         result.optimal_value = float(np.real(result.eigenvalue))
         result.optimal_point = np.asarray(evolution_result.parameter_values[-1])
@@ -329,6 +377,80 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
 
         return result
 
+    # pylint: disable=too-many-positional-arguments
+    def _step_integration(
+        self,
+        operator: BaseOperator,
+        initial_point: np.ndarray,
+        time: float,
+        variational_principle: ImaginaryVariationalPrinciple,
+        estimator: BaseEstimatorV2,
+        lse_solver: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    ) -> tuple[VarQTEResult, bool]:
+        """Integrates with line-search and/or implicit steps (see ``var_qite_integration``)."""
+        if self.ode_solver is not None:
+            raise QiskitNatureError(
+                "The implicit, line-search and trust-region integrations replace the ode_solver, "
+                "which must not be given."
+            )
+        if self.implicit and not isinstance(
+            variational_principle, StatevectorImaginaryMcLachlanPrinciple
+        ):
+            raise QiskitNatureError(
+                "Implicit steps require the StatevectorImaginaryMcLachlanPrinciple (exact "
+                "simulations), which provides the Hamiltonian in the tangent space."
+            )
+        if self.line_search and not _is_hermitian(operator):
+            raise QiskitNatureError(
+                "The line search requires a Hermitian Hamiltonian, whose energy decreases "
+                "monotonically along the imaginary time evolution."
+            )
+        statevector_principle = _statevector_principle(variational_principle)
+        circuit, observable = self.ansatz, operator
+        if statevector_principle is None and self.transpiler is not None:
+            circuit = self.transpiler.run(self.ansatz, **(self.transpiler_options or {}))
+            if circuit.layout is not None:
+                observable = operator.apply_layout(circuit.layout)
+
+        def evaluate(values: np.ndarray, implicit: bool):
+            metric = np.asarray(variational_principle.metric_tensor(self.ansatz, values))
+            rhs = np.asarray(
+                variational_principle.evolution_gradient(operator, self.ansatz, values)
+            )
+            tangent = None
+            if implicit:
+                tangent = variational_principle.tangent_hamiltonian(operator, self.ansatz, values)
+            return metric, rhs, tangent
+
+        def energy(values: np.ndarray) -> float:
+            if statevector_principle is not None:
+                state = statevector_principle.statevector(self.ansatz, values.tolist())
+                return float(np.real(statevector_principle.expectation_value(operator, state)))
+            evaluated = estimate_observables(estimator, circuit, [observable], values)
+            return float(np.real(evaluated[0][0]))
+
+        timestep, trust_region = step_options(
+            self.timestep, self.implicit, self.line_search, self.trust_region
+        )
+        times, parameter_values, converged = integrate(
+            evaluate,
+            energy,
+            initial_point,
+            time=time,
+            timestep=timestep,
+            implicit=self.implicit,
+            line_search=self.line_search,
+            trust_region=trust_region,
+            convergence_threshold=self.convergence_threshold,
+            lse_solver=lse_solver,
+        )
+        evolution_result = VarQTEResult(
+            self.ansatz.assign_parameters(parameter_values[-1]),
+            times=np.asarray(times),
+            parameter_values=np.asarray(parameter_values),
+        )
+        return evolution_result, converged
+
 
 class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResult):
     """The result of the :class:`.VarQITEMinimumEigensolver`."""
@@ -342,8 +464,9 @@ class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResul
 
     @property
     def converged(self) -> bool:
-        """Whether the default forward Euler integration stopped because the convergence
-        threshold was reached (before the maximal imaginary time)."""
+        """Whether the default forward Euler integration (or the line-search or implicit
+        integration) stopped because the convergence threshold was reached (before the maximal
+        imaginary time)."""
         return self._converged
 
     @converged.setter
@@ -376,6 +499,13 @@ class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResul
     @evolution_result.setter
     def evolution_result(self, evolution_result: VarQTEResult) -> None:
         self._evolution_result = evolution_result
+
+
+def _is_hermitian(operator: BaseOperator) -> bool:
+    """Whether a qubit operator is Hermitian (as :func:`.is_hermitian_qubit_operator`)."""
+    if not isinstance(operator, SparsePauliOp) or operator.coeffs.dtype == object:
+        return True
+    return not np.iscomplexobj(np.real_if_close(operator.simplify().coeffs))
 
 
 def _lstsq(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:

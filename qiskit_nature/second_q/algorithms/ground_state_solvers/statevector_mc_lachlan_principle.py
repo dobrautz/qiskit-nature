@@ -221,6 +221,44 @@ class StatevectorImaginaryMcLachlanPrinciple(ImaginaryVariationalPrinciple):
             rhs = rhs[[indices[param] for param in gradient_params]]
         return rhs
 
+    def tangent_hamiltonian(
+        self,
+        hamiltonian: BaseOperator,
+        ansatz: QuantumCircuit,
+        param_values: Sequence[float],
+    ) -> np.ndarray:
+        r"""
+        Calculates the Hamiltonian in the tangent space, as required by implicit integration
+        steps (see the ``implicit`` option of the :class:`.VarQITEMinimumEigensolver`),
+
+        .. math::
+
+            K_{ij} = \mathrm{Re}\langle T_i|H - E|T_j\rangle, \qquad
+            |T_i\rangle = |\partial_i\psi\rangle - |\psi\rangle\langle\psi|\partial_i\psi\rangle,
+            \qquad E = \langle\psi|H|\psi\rangle,
+
+        where the projection of the tangent vectors is omitted if ``phase_fix`` is ``False``.
+        This also holds for non-Hermitian Hamiltonians, for which :math:`E` is complex and
+        :math:`K` is not symmetric.
+
+        Args:
+            hamiltonian: The (possibly non-Hermitian) Hamiltonian.
+            ansatz: Quantum state in the form of a parametrized quantum circuit.
+            param_values: Values of the parameters of ``ansatz`` (in the order of
+                ``ansatz.parameters``).
+
+        Returns:
+            The matrix :math:`K`.
+        """
+        states = self._states(ansatz, param_values)
+        psi, derivatives = states[0], states[1:]
+        if self.phase_fix:
+            derivatives = derivatives - np.outer(derivatives @ psi.conj(), psi)
+        matrix = self._hamiltonian_matrix(hamiltonian)
+        energy = np.vdot(psi, matrix @ psi)
+        h_derivatives = (matrix @ derivatives.T).T - energy * derivatives
+        return np.real(derivatives.conj() @ h_derivatives.T)
+
     def _states(self, ansatz: QuantumCircuit, param_values: Sequence[float]) -> np.ndarray:
         """Returns the state and its derivatives (as rows), caching the last evaluation."""
         values = tuple(float(v) for v in param_values)

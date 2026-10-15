@@ -31,6 +31,7 @@ april
 arg
 arginine
 args
+armijo
 arrowheads
 arrowstyle
 arxiv
@@ -277,7 +278,9 @@ fredkin
 func
 functionalities
 für
+galerkin
 gauopen
+gauss
 gaussian
 gaussiand
 gcc
@@ -292,6 +295,7 @@ glutamine
 glycine
 gss
 gto
+halvings
 hamiltonian
 hamiltonians
 hardcoded
@@ -587,6 +591,7 @@ rgb
 rgba
 rhf
 rhs
+ritz
 rk
 robert
 rohf

@@ -32,6 +32,7 @@ from qiskit_nature.second_q.problems import (
 )
 
 from .ground_state_solver import GroundStateSolver
+from .var_qite_integration import integrate, step_options
 from .var_qite_minimum_eigensolver import VarQITEMinimumEigensolverResult, _lstsq
 
 
@@ -63,10 +64,11 @@ class FermionicVarQITESolver(GroundStateSolver):
         = -\mathrm{Re}\left[\langle\partial_i\psi|H|\psi\rangle
         - \langle\partial_i\psi|\psi\rangle\langle\psi|H|\psi\rangle\right]
 
-    are integrated with forward Euler steps until the parameters converge. This also holds for
-    non-Hermitian Hamiltonians, such as transcorrelated ones including three-body terms, in which
-    case the evolution converges to the right eigenvector whose eigenvalue has the lowest real
-    part.
+    are integrated with forward Euler steps until the parameters converge (or, optionally, with
+    line-search or shifted implicit steps, see :class:`.VarQITEMinimumEigensolver`). This also
+    holds for non-Hermitian Hamiltonians, such as transcorrelated ones including three-body terms,
+    in which case the evolution converges to the right eigenvector whose eigenvalue has the lowest
+    real part.
 
     The ansatz must be a :class:`.UCC` instance (e.g. :class:`.UCCSD`) without
     ``include_imaginary``. Its initial state is usually the :class:`.HartreeFock` state; other
@@ -93,8 +95,11 @@ class FermionicVarQITESolver(GroundStateSolver):
         initial_point: Sequence[float] | None = None,
         *,
         time: float = 1000.0,
-        timestep: float = 0.05,
+        timestep: float | None = None,
         convergence_threshold: float | None = 1e-6,
+        implicit: bool = False,
+        line_search: bool = False,
+        trust_region: float | None = None,
         lse_solver: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
         num_trajectory_points: int | None = 200,
         adjoint: bool = False,
@@ -105,10 +110,19 @@ class FermionicVarQITESolver(GroundStateSolver):
             initial_point: The initial parameter values. If ``None``, all parameters are
                 initialized to zero, i.e. the evolution starts from the Hartree-Fock state.
             time: The maximal imaginary time of the evolution.
-            timestep: The imaginary time step of the forward Euler integration.
+            timestep: The imaginary time step: of the forward Euler integration (default
+                ``0.05``), the maximal one with ``line_search=True`` (default ``1.0``), or that of
+                the implicit steps (default ``5.0``).
             convergence_threshold: The integration stops once the norm of the parameter
                 derivative :math:`\\|\\dot{\\theta}\\|` falls below this threshold. If ``None``,
                 the evolution always proceeds until ``time``.
+            implicit: Whether to integrate with shifted semi-implicit (Galerkin backward Euler)
+                steps, see :class:`.VarQITEMinimumEigensolver`.
+            line_search: Whether to shorten every step until the energy decreases sufficiently
+                (Hermitian Hamiltonians only), see :class:`.VarQITEMinimumEigensolver`.
+            trust_region: The maximal Fubini-Study length of a step. If ``None``, it is ``0.2``
+                for implicit steps and unrestricted otherwise; use ``numpy.inf`` to disable it
+                for implicit steps.
             lse_solver: The solver of the linear system of equations. If ``None``,
                 ``numpy.linalg.lstsq`` with a relative cutoff of ``1e-7`` for the singular values
                 is used.
@@ -129,6 +143,9 @@ class FermionicVarQITESolver(GroundStateSolver):
         self.time = time
         self.timestep = timestep
         self.convergence_threshold = convergence_threshold
+        self.implicit = implicit
+        self.line_search = line_search
+        self.trust_region = trust_region
         self.lse_solver = lse_solver
         self.num_trajectory_points = num_trajectory_points
         self.adjoint = adjoint
@@ -183,6 +200,29 @@ class FermionicVarQITESolver(GroundStateSolver):
         reference = self._reference_state(norb, nelec)
         lse_solver = self.lse_solver if self.lse_solver is not None else _lstsq
 
+        if self.implicit or self.line_search or self.trust_region is not None:
+            times, parameter_values, converged = self._step_integration(
+                hamiltonian, generators, reference, values, lse_solver
+            )
+        else:
+            times, parameter_values, converged = self._euler_integration(
+                hamiltonian, generators, reference, values, lse_solver
+            )
+        return self._finish(
+            problem,
+            hamiltonian,
+            generators,
+            reference,
+            times,
+            parameter_values,
+            converged,
+            values=parameter_values[-1],
+        )
+
+    # pylint: disable=too-many-positional-arguments
+    def _euler_integration(self, hamiltonian, generators, reference, values, lse_solver):
+        """The forward Euler integration with a fixed time step."""
+        timestep = self.timestep if self.timestep is not None else 0.05
         times = [0.0]
         parameter_values = [values.copy()]
         converged = False
@@ -201,7 +241,7 @@ class FermionicVarQITESolver(GroundStateSolver):
 
             remaining = self.time - time
             # avoid a tiny final step due to floating-point accumulation
-            step = remaining if remaining < self.timestep * (1 + 1e-9) else self.timestep
+            step = remaining if remaining < timestep * (1 + 1e-9) else timestep
             values = values + step * derivative
             time += step
             times.append(time)
@@ -211,7 +251,67 @@ class FermionicVarQITESolver(GroundStateSolver):
             ):
                 converged = True
                 break
+        return times, parameter_values, converged
 
+    # pylint: disable=too-many-positional-arguments
+    def _step_integration(self, hamiltonian, generators, reference, values, lse_solver):
+        """The line-search and/or implicit integration (see ``var_qite_integration``)."""
+        if self.line_search and np.abs(hamiltonian - hamiltonian.conj().T).max() > 1e-12:
+            raise QiskitNatureError(
+                "The line search requires a Hermitian Hamiltonian, whose energy decreases "
+                "monotonically along the imaginary time evolution."
+            )
+
+        def evaluate(point: np.ndarray, implicit: bool):
+            states = _states_and_derivatives(generators, point, reference)
+            psi, derivatives = states[0], states[1:]
+            h_psi = hamiltonian @ psi
+            energy = np.vdot(psi, h_psi)
+            overlaps = derivatives.conj() @ psi
+            metric = np.real(
+                derivatives.conj() @ derivatives.T - np.outer(overlaps, overlaps.conj())
+            )
+            rhs = -np.real(derivatives.conj() @ h_psi - overlaps * energy)
+            tangent = None
+            if implicit:
+                tangents = derivatives - np.outer(overlaps.conj(), psi)
+                h_tangents = (hamiltonian @ tangents.T).T - energy * tangents
+                tangent = np.real(tangents.conj() @ h_tangents.T)
+            return metric, rhs, tangent
+
+        def energy(point: np.ndarray) -> float:
+            psi = _states_and_derivatives(generators, point, reference, derivatives=False)[0]
+            return float(np.real(np.vdot(psi, hamiltonian @ psi)))
+
+        timestep, trust_region = step_options(
+            self.timestep, self.implicit, self.line_search, self.trust_region
+        )
+        return integrate(
+            evaluate,
+            energy,
+            values,
+            time=self.time,
+            timestep=timestep,
+            implicit=self.implicit,
+            line_search=self.line_search,
+            trust_region=trust_region,
+            convergence_threshold=self.convergence_threshold,
+            lse_solver=lse_solver,
+        )
+
+    # pylint: disable=too-many-positional-arguments
+    def _finish(
+        self,
+        problem,
+        hamiltonian,
+        generators,
+        reference,
+        times,
+        parameter_values,
+        converged,
+        values,
+    ):
+        """Evaluates the energies along the trajectory and interprets the result."""
         # energies along the trajectory at (a subset of) the time points
         num_points = len(times)
         if self.num_trajectory_points is None or num_points <= self.num_trajectory_points:
