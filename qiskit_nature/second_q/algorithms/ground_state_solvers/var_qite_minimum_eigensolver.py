@@ -412,22 +412,27 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             if circuit.layout is not None:
                 observable = operator.apply_layout(circuit.layout)
 
-        def evaluate(values: np.ndarray, implicit: bool):
-            metric = np.asarray(variational_principle.metric_tensor(self.ansatz, values))
-            rhs = np.asarray(
-                variational_principle.evolution_gradient(operator, self.ansatz, values)
-            )
+        def evaluate(
+            values: np.ndarray, implicit: bool
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+            point: list[float] = values.tolist()
+            metric = np.asarray(variational_principle.metric_tensor(self.ansatz, point))
+            rhs = np.asarray(variational_principle.evolution_gradient(operator, self.ansatz, point))
             tangent = None
             if implicit:
-                tangent = variational_principle.tangent_hamiltonian(operator, self.ansatz, values)
+                # implicit steps require the statevector principle (checked above)
+                assert statevector_principle is not None
+                tangent = statevector_principle.tangent_hamiltonian(operator, self.ansatz, point)
             return metric, rhs, tangent
 
         def energy(values: np.ndarray) -> float:
+            point: list[float] = values.tolist()
             if statevector_principle is not None:
-                state = statevector_principle.statevector(self.ansatz, values.tolist())
+                state = statevector_principle.statevector(self.ansatz, point)
                 return float(np.real(statevector_principle.expectation_value(operator, state)))
-            evaluated = estimate_observables(estimator, circuit, [observable], values)
-            return float(np.real(evaluated[0][0]))
+            evaluated = estimate_observables(estimator, circuit, [observable], point)
+            first = next(iter(evaluated.values())) if isinstance(evaluated, dict) else evaluated[0]
+            return float(np.real(first[0]))
 
         timestep, trust_region = step_options(
             self.timestep, self.implicit, self.line_search, self.trust_region
