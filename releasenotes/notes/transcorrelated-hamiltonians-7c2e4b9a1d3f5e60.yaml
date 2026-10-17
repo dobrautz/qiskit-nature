@@ -92,11 +92,14 @@ features:
     not depend on the metric, the evolution converges to the same state.
   - |
     Added the :class:`.ReferenceStateMitigatedPrinciple`, which applies reference-state error
-    mitigation (REM, MREM) to the quantities measured at every VarQITE time step: the noise bias
-    of the gradient (and optionally of the metric) is measured once at a reference state with
-    classically known exact values, e.g. a Hartree-Fock or multireference state prepared by the
-    initial-state part of the ansatz, and subtracted at every step. This reduces the shift of the
-    converged state caused by non-unital noise such as amplitude damping.
+    mitigation (REM, MREM) to the gradient measured at every VarQITE time step: its noise bias is
+    measured once at a reference state with classically known exact values and subtracted at
+    every step, which reduces the shift of the converged state caused by non-unital noise such as
+    amplitude damping. The reference must be a stationary point of the exact equations of motion
+    (e.g. a Hartree-Fock state with hardware-efficient layers, or a symmetry-adapted
+    multireference state), since otherwise the correction itself shifts the converged state; the
+    principle checks this and disables the correction with a warning for non-stationary
+    references, such as a :class:`.UCC` ansatz at ``theta = 0``.
   - |
     Added the :class:`.OverlapMetricPrinciple`, which measures the VarQITE metric from the overlaps
     :math:`|\langle\psi(\theta)|\psi(\theta + s)\rangle|^2` of compute-uncompute circuits with a
