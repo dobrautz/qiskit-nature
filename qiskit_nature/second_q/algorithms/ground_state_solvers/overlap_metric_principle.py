@@ -53,13 +53,14 @@ class OverlapMetricPrinciple(ImaginaryVariationalPrinciple):
 
     The unshifted circuit (:math:`s = 0`) has the exact overlap :math:`F = 1`. Hence, its measured
     value is a reference which is built into every evaluation: all measured overlaps of the same
-    evaluation are divided by it (``normalize=True``). This removes the damping of the overlaps by
+    evaluation are divided by it (``normalize=True``). This reduces the damping of the overlaps by
     gate noise and readout errors, which is to a good approximation the same for all circuits of
-    an evaluation since they share their structure. In noisy simulations, the metric obtained in
-    this way gave VarQITE trajectories as accurate as with the exact metric, whereas the metric of
-    the :class:`~qiskit_algorithms.gradients.LinCombQGT` was sometimes several times less accurate.
-    The compute-uncompute circuits are twice as deep as the ansatz, which limits the method to
-    shallow circuits, and the number of circuits per evaluation, :math:`1 + \sum_k (2R_k - 1) +
+    an evaluation since they share their structure. In noisy simulations of shallow circuits (four
+    qubits, up to twelve CNOT gates), the metric obtained in this way gave VarQITE trajectories
+    about as accurate as with the exact metric, whereas the metric of the
+    :class:`~qiskit_algorithms.gradients.LinCombQGT` was up to several times less accurate; for a
+    circuit of about 130 CNOT gates (eight qubits) no gain remained, since the compute-uncompute
+    circuits are twice as deep as the ansatz. This limits the method to shallow circuits, and the number of circuits per evaluation, :math:`1 + \sum_k (2R_k - 1) +
     \sum_{k<l} 4R_kR_l`, is about four times that of the LinComb metric for :math:`R = 1`. Only the
     diagonal blocks given by ``blocks`` can be evaluated to reduce it, which however changes the
     trajectory.

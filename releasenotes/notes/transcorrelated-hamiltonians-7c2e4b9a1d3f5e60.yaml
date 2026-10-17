@@ -107,9 +107,10 @@ features:
     rotations, phase gates and Pauli evolutions such as the excitations of a :class:`.UCC` ansatz
     (see :func:`.parameter_frequencies`). All overlaps of an evaluation are divided by the
     measured overlap of the unshifted circuit, whose exact value is one. This built-in reference
-    removes the damping of the overlaps by gate noise and readout errors, which makes the metric,
-    and hence the VarQITE trajectory, considerably more accurate than with the LinComb metric in
-    noisy simulations of shallow circuits.
+    reduces the damping of the overlaps by gate noise and readout errors, which made the metric,
+    and hence the VarQITE trajectory, up to several times more accurate than with the LinComb
+    metric in noisy simulations of shallow circuits (no gain remained for a circuit of about 130
+    CNOT gates, since the compute-uncompute circuits are twice as deep as the ansatz).
   - |
     :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
     coefficients of the Pauli representation of the mapped qubit operator (see also
