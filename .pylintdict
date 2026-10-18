@@ -62,6 +62,7 @@ ffsim
 fitzek
 frac
 fubini
+geq
 guther
 gutzwiller
 hijkl
@@ -70,7 +71,10 @@ izaac
 jastrow
 jonsson
 killoran
+leftarrow
+leq
 lincomb
+linearization
 lolur
 luo
 lópez
@@ -79,6 +83,7 @@ mathrm
 mcardle
 mclachlan
 microhartree
+millihartree
 mrem
 multireference
 multisets
@@ -99,6 +104,7 @@ rem
 ríos
 schraivogel
 schäfer
+semidefinite
 simulable
 skogh
 sokolov

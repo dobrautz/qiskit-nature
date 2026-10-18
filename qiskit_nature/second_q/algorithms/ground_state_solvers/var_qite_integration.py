@@ -156,7 +156,7 @@ def integrate(
         taken, update = step(size)
         if line_search:
             for _ in range(MAX_TRIALS - 1):
-                # dE/dh = -2 C.d at h = 0 for a Hermitian Hamiltonian
+                # the energy changes as -2 C.d per unit step at h = 0 for a Hermitian Hamiltonian
                 new_energy = energy(values + update)
                 if new_energy <= current_energy - 2 * ARMIJO * max(float(rhs @ update), 0.0):
                     break
