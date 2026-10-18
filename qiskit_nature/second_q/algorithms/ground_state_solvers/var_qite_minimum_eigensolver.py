@@ -211,7 +211,12 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                 observables, whose layout is taken into account. The evolution itself operates on
                 the logical ``ansatz``.
             transpiler_options: Keyword arguments passed to the ``run`` method of ``transpiler``.
+
+        Raises:
+            ValueError: If ``num_trajectory_points`` is not positive.
         """
+        if num_trajectory_points is not None and num_trajectory_points < 1:
+            raise ValueError("The number of trajectory points must be positive.")
         self.ansatz = ansatz
         self.initial_point = initial_point
         self.time = time
@@ -319,13 +324,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
             )
 
         # evaluate the observables at (a subset of) the time points of the trajectory
-        num_points = len(evolution_result.times)
-        if self.num_trajectory_points is None or num_points <= self.num_trajectory_points:
-            indices = np.arange(num_points)
-        else:
-            indices = np.unique(
-                np.linspace(0, num_points - 1, self.num_trajectory_points).astype(int)
-            )
+        indices = _trajectory_indices(len(evolution_result.times), self.num_trajectory_points)
         exact = statevector_principle is not None
         observables_to_evaluate = [operator, *aux_list]
         circuit = self.ansatz
@@ -504,6 +503,16 @@ class VarQITEMinimumEigensolverResult(VariationalResult, MinimumEigensolverResul
     @evolution_result.setter
     def evolution_result(self, evolution_result: VarQTEResult) -> None:
         self._evolution_result = evolution_result
+
+
+def _trajectory_indices(num_points: int, max_points: int | None) -> np.ndarray:
+    """The indices of at most ``max_points`` of ``num_points`` time points, always including the
+    final one."""
+    if max_points is None or num_points <= max_points:
+        return np.arange(num_points)
+    if max_points == 1:
+        return np.array([num_points - 1])
+    return np.unique(np.linspace(0, num_points - 1, max_points).astype(int))
 
 
 def _is_hermitian(operator: BaseOperator) -> bool:

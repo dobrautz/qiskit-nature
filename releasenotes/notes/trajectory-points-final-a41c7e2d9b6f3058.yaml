@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    The :class:`.VarQITEMinimumEigensolver` and the :class:`.FermionicVarQITESolver` now include
+    the final time point in the evaluated trajectory for ``num_trajectory_points=1`` as documented;
+    before, they evaluated the initial point only and reported its energy as the eigenvalue. A
+    ``num_trajectory_points`` smaller than one raises a ``ValueError``.

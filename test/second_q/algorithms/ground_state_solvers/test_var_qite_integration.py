@@ -175,6 +175,38 @@ class TestVarQITEIntegration(QiskitNatureTestCase):
                 self.ansatz, implicit=True, ode_solver="RK45"
             ).compute_minimum_eigenvalue(self.hermitian_operator)
 
+    @data(1, 2, 5)
+    def test_trajectory_points(self, num_points):
+        """Test that the subset of trajectory points always includes the final one."""
+        full = VarQITEMinimumEigensolver(
+            self.ansatz, time=1.0, convergence_threshold=None
+        ).compute_minimum_eigenvalue(self.tc_operator)
+        result = VarQITEMinimumEigensolver(
+            self.ansatz, time=1.0, convergence_threshold=None, num_trajectory_points=num_points
+        ).compute_minimum_eigenvalue(self.tc_operator)
+        self.assertEqual(len(result.energies), num_points)
+        self.assertAlmostEqual(result.times[-1], full.times[-1])
+        self.assertAlmostEqual(result.eigenvalue, full.eigenvalue, places=12)
+        with self.assertRaises(ValueError):
+            VarQITEMinimumEigensolver(self.ansatz, num_trajectory_points=0)
+        if _optionals.HAS_FFSIM:
+            problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
+            mapper = JordanWignerMapper()
+            norb, nelec = problem.num_spatial_orbitals, problem.num_particles
+            ansatz = UCCSD(norb, nelec, mapper, initial_state=HartreeFock(norb, nelec, mapper))
+            fermionic = FermionicVarQITESolver(
+                ansatz, time=1.0, convergence_threshold=None, num_trajectory_points=num_points
+            ).solve(problem)
+            fermionic_full = FermionicVarQITESolver(
+                ansatz, time=1.0, convergence_threshold=None
+            ).solve(problem)
+            self.assertEqual(len(fermionic.raw_result.energies), num_points)
+            self.assertAlmostEqual(
+                fermionic.raw_result.eigenvalue, fermionic_full.raw_result.eigenvalue, places=12
+            )
+            with self.assertRaises(ValueError):
+                FermionicVarQITESolver(ansatz, num_trajectory_points=0)
+
     @unittest.skipUnless(_optionals.HAS_FFSIM, "ffsim not available.")
     def test_fermionic_solver_agrees_with_qubit_simulation(self):
         """Test the implicit steps of the FermionicVarQITESolver against the qubit simulation."""

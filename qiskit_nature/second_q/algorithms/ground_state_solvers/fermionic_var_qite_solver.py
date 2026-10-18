@@ -33,7 +33,11 @@ from qiskit_nature.second_q.problems import (
 
 from .ground_state_solver import GroundStateSolver
 from .var_qite_integration import integrate, step_options
-from .var_qite_minimum_eigensolver import VarQITEMinimumEigensolverResult, _lstsq
+from .var_qite_minimum_eigensolver import (
+    VarQITEMinimumEigensolverResult,
+    _lstsq,
+    _trajectory_indices,
+)
 
 
 class FermionicVarQITESolver(GroundStateSolver):
@@ -134,9 +138,12 @@ class FermionicVarQITESolver(GroundStateSolver):
 
         Raises:
             QiskitNatureError: If the ansatz is not a :class:`.UCC` instance.
+            ValueError: If ``num_trajectory_points`` is not positive.
         """
         if not isinstance(ansatz, UCC):
             raise QiskitNatureError("The ansatz must be a UCC instance.")
+        if num_trajectory_points is not None and num_trajectory_points < 1:
+            raise ValueError("The number of trajectory points must be positive.")
         super().__init__(ansatz.qubit_mapper)
         self.ansatz = ansatz
         self.initial_point = initial_point
@@ -313,13 +320,7 @@ class FermionicVarQITESolver(GroundStateSolver):
     ):
         """Evaluates the energies along the trajectory and interprets the result."""
         # energies along the trajectory at (a subset of) the time points
-        num_points = len(times)
-        if self.num_trajectory_points is None or num_points <= self.num_trajectory_points:
-            indices = np.arange(num_points)
-        else:
-            indices = np.unique(
-                np.linspace(0, num_points - 1, self.num_trajectory_points).astype(int)
-            )
+        indices = _trajectory_indices(len(times), self.num_trajectory_points)
         energies = []
         for index in indices:
             psi = _states_and_derivatives(
