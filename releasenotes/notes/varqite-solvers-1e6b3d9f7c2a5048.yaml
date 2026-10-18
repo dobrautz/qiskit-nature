@@ -1,0 +1,48 @@
+---
+features:
+  - |
+    Added the :class:`.VarQITEMinimumEigensolver`, a minimum eigensolver based on variational
+    quantum imaginary time evolution, which also supports non-Hermitian Hamiltonians. It converges
+    to the right eigenvector whose eigenvalue has the lowest real part. By default, the equations
+    of motion are integrated with forward Euler steps of ``timestep=0.05`` until the norm of the
+    parameter derivative falls below ``convergence_threshold=1e-6`` (see
+    :attr:`.VarQITEMinimumEigensolverResult.converged`), which is robust also for ansätze with
+    nearly singular metric tensors, such as hardware-efficient ones. For exact simulations, it
+    uses the new :class:`.StatevectorImaginaryMcLachlanPrinciple`, which propagates the state and
+    all its parameter derivatives through the circuit in a single pass and is orders of magnitude
+    faster than evaluating gradient circuits with estimator primitives. For estimators with shot
+    noise, the linear system is regularized by default with a Tikhonov shift of ``0.1`` (see the
+    new :func:`.tikhonov_solver`), which suppresses the shot noise but, unlike a cutoff of small
+    singular values, keeps the stationary points of the evolution, and a fixed evolution time is
+    used. The ``transpiler`` argument compiles the gradient,
+    quantum geometric tensor and observable circuits for the backend of the estimator, which
+    enables the use of simulators (e.g. those of Qiskit Aer, including noisy and matrix product
+    state simulations) and of hardware backends via Qiskit IBM Runtime.
+  - |
+    Added the :class:`.FermionicVarQITESolver`, which simulates the VarQITE of unitary coupled
+    cluster ansätze exactly in the sector of fixed particle numbers using the optional `ffsim
+    <https://github.com/qiskit-community/ffsim>`_ library. Since this sector is much smaller than
+    the qubit Hilbert space, larger systems can be treated, e.g. H2 in the cc-pVDZ basis (20
+    qubits) in a few seconds. The parameters agree with those of the qubit circuit of the
+    :class:`.UCC` ansatz.
+  - |
+    The :class:`.FermionicVarQITESolver` now also solves problems other than
+    :class:`.ElectronicStructureProblem`, e.g. a :class:`.LatticeModelProblem`, supports initial
+    states other than the :class:`.HartreeFock` state (e.g. a :class:`.SlaterDeterminant`) for the
+    :class:`.JordanWignerMapper`, can evolve with the adjoint Hamiltonian (``adjoint=True``) to
+    approximate the left eigenvector, and computes the biorthogonal energy of a left and a right
+    state with :meth:`.FermionicVarQITESolver.biorthogonal_energy`.
+  - |
+    Added the :class:`.ApproximateMetricPrinciple`, which reduces the number of quantum geometric
+    tensor circuits of a VarQITE by evaluating only the block-diagonal (see
+    :func:`.parameter_layers`) or diagonal part of the metric, by reusing it for several time
+    steps, and by updating it with the rank-one qBroyden rule of Fitzek et al., Quantum 8, 1313
+    (2024), without further circuits. Since the stationary points of the equations of motion do
+    not depend on the metric, the evolution converges to the same state.
+  - |
+    :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
+    coefficients of the Pauli representation of the mapped qubit operator (see also
+    :func:`.is_hermitian_qubit_operator`). Since estimator-based variational eigensolvers such as
+    the VQE cannot treat such Hamiltonians, a :class:`.VarQITEMinimumEigensolver` with the ansatz,
+    initial point and estimator of the configured solver is used instead (with a warning). A
+    different solver can be provided via the new ``non_hermitian_solver`` argument.

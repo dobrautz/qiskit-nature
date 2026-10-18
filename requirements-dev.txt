@@ -2,6 +2,7 @@ black[jupyter]~=24.1
 coverage>=4.4.0
 ddt>=1.2.0,!=1.4.0,!=1.4.3
 discover
+ffsim
 h5py
 jupyter-sphinx
 matplotlib>=3.3

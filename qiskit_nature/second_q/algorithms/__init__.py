@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2019, 2023.
+# (C) Copyright IBM 2019, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -76,6 +76,30 @@ the solvers themselves.
 
    GroundStateEigensolver
 
+A minimum eigensolver based on variational quantum imaginary time evolution, which also supports
+non-Hermitian (e.g. transcorrelated) Hamiltonians, and its result.
+
+.. autosummary::
+   :toctree: ../stubs/
+   :nosignatures:
+
+   VarQITEMinimumEigensolver
+   VarQITEMinimumEigensolverResult
+   tikhonov_solver
+   StatevectorImaginaryMcLachlanPrinciple
+   ApproximateMetricPrinciple
+   parameter_layers
+   is_hermitian_qubit_operator
+
+A ground state solver which simulates VarQITE with unitary coupled cluster ansätze exactly in the
+sector of fixed particle numbers (requires ``ffsim``).
+
+.. autosummary::
+   :toctree: ../stubs/
+   :nosignatures:
+
+   FermionicVarQITESolver
+
 Initial Points
 ++++++++++++++
 When using variational algorithms such as the :class:`~qiskit_algorithms.VQE`
@@ -103,6 +127,14 @@ from .excited_states_solvers import (
 from .ground_state_solvers import (
     GroundStateEigensolver,
     GroundStateSolver,
+    VarQITEMinimumEigensolver,
+    VarQITEMinimumEigensolverResult,
+    tikhonov_solver,
+    StatevectorImaginaryMcLachlanPrinciple,
+    ApproximateMetricPrinciple,
+    parameter_layers,
+    FermionicVarQITESolver,
+    is_hermitian_qubit_operator,
 )
 
 __all__ = [
@@ -113,4 +145,12 @@ __all__ = [
     "EvaluationRule",
     "GroundStateEigensolver",
     "GroundStateSolver",
+    "VarQITEMinimumEigensolver",
+    "VarQITEMinimumEigensolverResult",
+    "tikhonov_solver",
+    "StatevectorImaginaryMcLachlanPrinciple",
+    "ApproximateMetricPrinciple",
+    "parameter_layers",
+    "FermionicVarQITESolver",
+    "is_hermitian_qubit_operator",
 ]
