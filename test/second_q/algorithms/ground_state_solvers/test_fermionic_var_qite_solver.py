@@ -118,6 +118,36 @@ class TestFermionicVarQITESolver(QiskitNatureTestCase):
             result.raw_result.optimal_point, reference.optimal_point, atol=1e-12
         )
 
+    def test_solver_interface(self):
+        """Test the methods of the ground state solver interface."""
+        problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
+        mapper = JordanWignerMapper()
+        solver = FermionicVarQITESolver(uccsd(problem, mapper))
+        self.assertIsNone(solver.solver)
+        self.assertFalse(solver.supports_aux_operators())
+        operator, aux_operators = solver.get_qubit_operators(problem)
+        self.assertIsNone(aux_operators)
+        self.assertTrue(operator.equiv(mapper.map(problem.hamiltonian.second_q_op())))
+
+    def test_invalid_ansatz(self):
+        """Test that unsupported UCC ansätze raise."""
+        problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
+        mapper = JordanWignerMapper()
+        cases = {
+            "complex": UCCSD(
+                2,
+                (1, 1),
+                mapper,
+                initial_state=HartreeFock(2, (1, 1), mapper),
+                include_imaginary=True,
+            ),
+            "orbitals": UCCSD(3, (1, 1), mapper, initial_state=HartreeFock(3, (1, 1), mapper)),
+        }
+        for name, ansatz in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(QiskitNatureError):
+                    FermionicVarQITESolver(ansatz).solve(problem)
+
     def test_unsupported_input(self):
         """Test that unsupported input raises."""
         problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))

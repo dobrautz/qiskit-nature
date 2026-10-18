@@ -20,6 +20,8 @@ import numpy as np
 
 from qiskit_nature.second_q.mappers import JordanWignerMapper
 from qiskit_nature.second_q.operators import FermionicOp
+from qiskit_nature.second_q.hamiltonians import ElectronicEnergy
+from qiskit_nature.second_q.operators import ElectronicIntegrals
 from qiskit_nature.second_q.operators.three_body_integrals import (
     S48_PERMUTATIONS,
     ThreeBodyIntegrals,
@@ -89,6 +91,17 @@ class TestThreeBodyIntegrals(QiskitNatureTestCase):
         self.assertEqual(integrals.symmetry, "s1")
         np.testing.assert_allclose(integrals.to_dense(), tensor)
         self.assertFalse(integrals.is_hermitian())
+        self.assertAlmostEqual(integrals[1, 0, 1, 0, 0, 1], tensor[1, 0, 1, 0, 0, 1])
+        self.assertEqual(integrals.register_length, 4)
+
+    def test_empty_and_three_body_only(self):
+        """Test integrals without entries and a Hamiltonian with only three-body terms."""
+        empty = ThreeBodyIntegrals(np.zeros((0, 6), dtype=int), np.zeros(0), 2)
+        self.assertEqual(len(empty), 0)
+        np.testing.assert_array_equal(empty.to_dense(), np.zeros((2,) * 6))
+        three_body = ThreeBodyIntegrals(np.array([[0, 1, 0, 1, 0, 1]]), np.array([0.5]), 2)
+        energy = ElectronicEnergy(ElectronicIntegrals(), three_body=three_body)
+        self.assertEqual(energy.register_length, 2)
 
     def test_second_q_op(self):
         """Test the second-quantized operator against a direct construction."""

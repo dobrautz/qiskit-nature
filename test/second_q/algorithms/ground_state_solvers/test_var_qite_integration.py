@@ -18,7 +18,11 @@ from test import QiskitNatureTestCase
 
 import numpy as np
 from ddt import data, ddt
+from qiskit import QuantumCircuit, generate_preset_pass_manager
+from qiskit.circuit import Parameter
 from qiskit.circuit.library import efficient_su2
+from qiskit.primitives import StatevectorEstimator
+from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit_algorithms.time_evolvers.variational import ImaginaryMcLachlanPrinciple
 
@@ -30,6 +34,7 @@ from qiskit_nature.second_q.algorithms import (
     VarQITEMinimumEigensolver,
 )
 from qiskit_nature.second_q.algorithms.ground_state_solvers.var_qite_integration import (
+    step_options,
     tangent_space_shift,
 )
 from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
@@ -159,6 +164,62 @@ class TestVarQITEIntegration(QiskitNatureTestCase):
             metric = principle.metric_tensor(self.ansatz, start)
             delta = np.asarray(end) - np.asarray(start)
             self.assertLessEqual(np.sqrt(delta @ metric @ delta), 0.05 * (1 + 1e-9))
+
+    def test_line_search_with_estimator(self):
+        """Test the line search with an estimator-based principle, a transpiler and step
+        halving."""
+        # a device layout, such that the observable has to follow the layout of the ansatz
+        pass_manager = generate_preset_pass_manager(
+            optimization_level=1, backend=GenericBackendV2(4, seed=3), seed_transpiler=7
+        )
+        exact = VarQITEMinimumEigensolver(
+            self.ansatz, line_search=True, timestep=50.0, time=200.0
+        ).compute_minimum_eigenvalue(self.hermitian_operator)
+        result = VarQITEMinimumEigensolver(
+            self.ansatz,
+            line_search=True,
+            timestep=50.0,
+            time=200.0,
+            estimator=StatevectorEstimator(),
+            variational_principle=ImaginaryMcLachlanPrinciple(),
+            transpiler=pass_manager,
+        ).compute_minimum_eigenvalue(self.hermitian_operator)
+        # the first trial step of 50 is too long and gets halved (six times)
+        self.assertLess(result.times[1] - result.times[0], 1.0)
+        self.assertTrue(np.all(np.diff(np.real(result.energies)) <= 1e-12))
+        np.testing.assert_allclose(result.times, exact.times, atol=1e-8)
+        self.assertAlmostEqual(result.eigenvalue, exact.eigenvalue, places=8)
+
+        # steps which fail the sufficient-decrease test after all halvings are taken anyway
+        long_steps = VarQITEMinimumEigensolver(
+            self.ansatz, line_search=True, timestep=1000.0, time=4000.0
+        ).compute_minimum_eigenvalue(self.hermitian_operator)
+        self.assertAlmostEqual(long_steps.eigenvalue, exact.eigenvalue, places=6)
+
+    def test_default_principle_for_unsupported_ansatz(self):
+        """Test that ansätze not supported by the statevector principle use the estimator-based
+        principle."""
+        theta = Parameter("t")
+        ansatz = QuantumCircuit(2)
+        ansatz.ry(theta * theta, 0)
+        ansatz.cx(0, 1)
+        self.assertFalse(StatevectorImaginaryMcLachlanPrinciple.supports(ansatz))
+        operator = SparsePauliOp(["ZZ", "XX", "ZI"], [0.5, 0.3, -0.7])
+        result = VarQITEMinimumEigensolver(ansatz, [0.4], time=1.0).compute_minimum_eigenvalue(
+            operator
+        )
+        reference = VarQITEMinimumEigensolver(
+            ansatz, [0.4], time=1.0, variational_principle=ImaginaryMcLachlanPrinciple()
+        ).compute_minimum_eigenvalue(operator)
+        np.testing.assert_allclose(result.optimal_point, reference.optimal_point, atol=1e-12)
+
+    def test_options_and_shift_edge_cases(self):
+        """Test the default options and the shift for a vanishing metric."""
+        self.assertEqual(step_options(None, True, False, None), (5.0, 0.2))
+        self.assertEqual(step_options(None, True, False, np.inf), (5.0, None))
+        self.assertEqual(step_options(None, False, True, None), (1.0, None))
+        self.assertEqual(step_options(0.1, False, False, 0.5), (0.1, 0.5))
+        self.assertEqual(tangent_space_shift(np.eye(2), np.zeros((2, 2))), 0.0)
 
     def test_unsupported_options(self):
         """Test that unsupported combinations raise."""

@@ -18,10 +18,12 @@ from test import QiskitNatureTestCase
 
 import numpy as np
 from ddt import data, ddt
+from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter, ParameterVector
 from qiskit.circuit.library import efficient_su2
 from qiskit.primitives import StatevectorEstimator
 from qiskit.providers.fake_provider import GenericBackendV2
-from qiskit.quantum_info import Statevector
+from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit.transpiler import generate_preset_pass_manager
 
 import qiskit_nature.optionals as _optionals
@@ -117,6 +119,30 @@ class TestBiorthogonal(QiskitNatureTestCase):
         self.assertAlmostEqual(
             estimated, biorthogonal_expectation_value(self.operator, ansatz, left, right)
         )
+
+    def test_parameter_dependent_global_phase(self):
+        """Test an ansatz whose decomposition has a parameter-dependent global phase, which is a
+        relative phase of the two branches of the transition circuit."""
+        theta = ParameterVector("t", 3)
+        circuit = QuantumCircuit(2)
+        circuit.ry(theta[0], 0)
+        circuit.cx(0, 1)
+        circuit.p(theta[1], 1)
+        circuit.ry(theta[2], 1)
+        operator = SparsePauliOp(["XZ", "ZI", "YY"], [0.4, 1.0 + 0.3j, -0.2])
+        left, right = np.array([0.3, 0.9, -0.4]), np.array([0.5, -0.6, 0.2])
+        exact = biorthogonal_expectation_value(operator, circuit, left, right)
+        measured = biorthogonal_expectation_value(
+            operator, circuit, left, right, StatevectorEstimator()
+        )
+        self.assertAlmostEqual(measured, exact, places=10)
+
+    def test_orthogonal_states_raise(self):
+        """Test that orthogonal left and right states raise."""
+        circuit = QuantumCircuit(1)
+        circuit.ry(Parameter("t"), 0)
+        with self.assertRaises(QiskitNatureError):
+            biorthogonal_expectation_value(SparsePauliOp("Z"), circuit, [0.0], [np.pi])
 
     def test_invalid_input(self):
         """Test that invalid input raises."""

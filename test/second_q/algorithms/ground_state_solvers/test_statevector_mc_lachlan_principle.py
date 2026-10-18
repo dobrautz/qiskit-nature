@@ -21,8 +21,8 @@ from ddt import data, ddt
 from qiskit import QuantumCircuit
 from qiskit.circuit import ParameterVector
 from qiskit.circuit.library import PauliEvolutionGate, efficient_su2
-from qiskit.quantum_info import Operator, SparsePauliOp, Statevector
-from qiskit.synthesis import LieTrotter
+from qiskit.quantum_info import Operator, SparseObservable, SparsePauliOp, Statevector
+from qiskit.synthesis import LieTrotter, SuzukiTrotter
 from qiskit_algorithms.gradients import ReverseEstimatorGradient, ReverseQGT
 from qiskit_algorithms.time_evolvers.variational import ImaginaryMcLachlanPrinciple
 
@@ -71,6 +71,12 @@ def finite_difference_system(ansatz, hamiltonian, values, eps=1e-6):
     return metric, gradient
 
 
+def synthesized(circuit: QuantumCircuit) -> QuantumCircuit:
+    """The circuit with its Pauli evolutions replaced by their synthesis, as executed after
+    transpilation (``Statevector`` would use their exact exponentials instead)."""
+    return circuit.decompose(gates_to_decompose=["PauliEvolution"])
+
+
 def mixed_circuit() -> QuantumCircuit:
     """A circuit with various supported instructions, shared parameters and a global phase."""
     theta = ParameterVector("t", 4)
@@ -79,9 +85,10 @@ def mixed_circuit() -> QuantumCircuit:
     circuit.p(theta[0], 1)
     circuit.rzz(2 * theta[1] + 0.1, 0, 2)
     circuit.cx(1, 2)
-    # non-commuting terms, synthesized with two first-order Trotter steps
+    # non-commuting terms (the last one does not commute with the first one), synthesized with
+    # two first-order Trotter steps, which the principle has to reproduce exactly
     evolution = PauliEvolutionGate(
-        SparsePauliOp(["XYI", "ZZX", "IYZ"], [0.5, -0.3, 0.8]),
+        SparsePauliOp(["XYI", "ZZX", "IYZ", "ZII"], [0.5, -0.3, 0.8, 0.4]),
         theta[2],
         synthesis=LieTrotter(reps=2),
     )
@@ -127,7 +134,7 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         metric = principle.metric_tensor(ansatz, values)
         gradient = principle.evolution_gradient(hamiltonian, ansatz, values)
 
-        fd_metric, fd_gradient = finite_difference_system(ansatz, hamiltonian, values)
+        fd_metric, fd_gradient = finite_difference_system(synthesized(ansatz), hamiltonian, values)
         np.testing.assert_allclose(metric, fd_metric, atol=1e-7)
         np.testing.assert_allclose(gradient, fd_gradient, atol=1e-7)
         if case != "mixed":
@@ -139,7 +146,7 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
             )
         np.testing.assert_allclose(
             principle.statevector(ansatz, values),
-            Statevector(ansatz.assign_parameters(values)).data,
+            Statevector(synthesized(ansatz).assign_parameters(values)).data,
             atol=1e-12,
         )
 
@@ -153,6 +160,54 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         subset = [ansatz.parameters[3], ansatz.parameters[1]]
         np.testing.assert_allclose(
             principle.evolution_gradient(hamiltonian, ansatz, values, subset), full[[3, 1]]
+        )
+
+    def test_hamiltonian_types(self):
+        """Test Hamiltonians given as an Operator or a SparseObservable."""
+        ansatz = efficient_su2(2, reps=1)
+        hamiltonian = non_hermitian_operator(2, seed=3)
+        values = np.linspace(-0.4, 0.9, ansatz.num_parameters)
+        reference = StatevectorImaginaryMcLachlanPrinciple().evolution_gradient(
+            hamiltonian, ansatz, values
+        )
+        for other in (Operator(hamiltonian), SparseObservable.from_sparse_pauli_op(hamiltonian)):
+            with self.subTest(type(other).__name__):
+                gradient = StatevectorImaginaryMcLachlanPrinciple().evolution_gradient(
+                    other, ansatz, values
+                )
+                np.testing.assert_allclose(gradient, reference, atol=1e-12)
+
+    def test_pauli_evolution_variants(self):
+        """Test a Suzuki-Trotter synthesized evolution (compiled from its definition), a
+        SparseObservable evolution and a fixed evolution on more qubits than the matrix
+        compilation handles."""
+        theta = ParameterVector("t", 3)
+        non_commuting = SparsePauliOp(["XI", "ZZ", "IY"], [0.4, 0.7, -0.3])
+        circuit = QuantumCircuit(4)
+        circuit.ry(theta[0], [0, 1, 2, 3])
+        circuit.append(
+            PauliEvolutionGate(non_commuting, theta[1], synthesis=SuzukiTrotter(order=2)), [0, 1]
+        )
+        observable = SparseObservable.from_sparse_pauli_op(SparsePauliOp(["ZZ", "XX"], [0.6, 0.2]))
+        circuit.append(PauliEvolutionGate(observable, theta[2]), [2, 3])
+        circuit.append(
+            PauliEvolutionGate(SparsePauliOp(["XXXX", "YYXX"], [0.5, 0.25]), 0.3), [0, 1, 2, 3]
+        )
+        values = np.array([0.3, -0.7, 0.5])
+        hamiltonian = non_hermitian_operator(4, seed=2)
+        principle = StatevectorImaginaryMcLachlanPrinciple()
+        self.assertTrue(principle.supports(circuit))
+        state = principle.statevector(circuit, values)
+        np.testing.assert_allclose(
+            state, Statevector(synthesized(circuit).assign_parameters(values)).data, atol=1e-12
+        )
+        # the synthesized product differs from the exact exponential of non-commuting terms
+        exact = Statevector(circuit.assign_parameters(values)).data
+        self.assertGreater(np.abs(state - exact).max(), 1e-4)
+        fd_metric, fd_gradient = finite_difference_system(synthesized(circuit), hamiltonian, values)
+        np.testing.assert_allclose(principle.metric_tensor(circuit, values), fd_metric, atol=1e-7)
+        np.testing.assert_allclose(
+            principle.evolution_gradient(hamiltonian, circuit, values), fd_gradient, atol=1e-7
         )
 
     def test_supports(self):

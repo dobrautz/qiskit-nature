@@ -29,6 +29,7 @@ from qiskit_nature import QiskitNatureError
 from qiskit_nature.second_q.formats import fcidump_to_problem
 from qiskit_nature.second_q.formats.fcidump import FCIDump
 from qiskit_nature.second_q.formats.tcdump import TCDump
+from qiskit_nature.second_q.hamiltonians import ElectronicEnergy
 from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
 from qiskit_nature.second_q.operators.symmetric_two_body import S1Integrals, S8Integrals
 
@@ -140,6 +141,101 @@ class TestTranscorrelatedFCIDump(QiskitNatureTestCase):
         np.testing.assert_allclose(np.asarray(parsed.hijkl.array), hijkl, atol=1e-14)
         np.testing.assert_allclose(np.asarray(parsed.hijkl_bb.array), hijkl_bb, atol=1e-14)
         np.testing.assert_allclose(np.asarray(parsed.hijkl_ba.array), hijkl_ba, atol=1e-14)
+
+    def test_unrestricted_mixed_spin_order(self):
+        """Test that mixed-spin entries of unrestricted files are read in either electron order."""
+        hij, hijkl = random_tc_integrals(2, seed=4)
+        hijkl_ba = np.random.default_rng(5).normal(size=(2,) * 4)
+        fcidump = FCIDump(
+            num_electrons=2,
+            hij=hij,
+            hijkl=S1Integrals(hijkl),
+            hij_b=hij,
+            hijkl_bb=S1Integrals(hijkl),
+            hijkl_ba=S1Integrals(hijkl_ba),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "FCIDUMP"
+            fcidump.to_file(path)
+            lines = path.read_text(encoding="utf8").splitlines()
+            # the dumper lists the mixed-spin entries alpha first, (ia|jb) with alpha i, a and
+            # beta j, b; list them as the electron-exchanged (jb|ia) instead
+            swapped = []
+            for line in lines:
+                tokens = line.split()
+                numeric = len(tokens) == 5 and all(t.isdigit() for t in tokens[1:])
+                indices = [int(t) for t in tokens[1:]] if numeric else []
+                if indices and min(indices) > 0 and max(indices[:2]) <= 2 < min(indices[2:]):
+                    line = f"{tokens[0]} {tokens[3]} {tokens[4]} {tokens[1]} {tokens[2]}"
+                swapped.append(line)
+            self.assertNotEqual(swapped, lines)
+            path.write_text("\n".join(swapped) + "\n", encoding="utf8")
+            parsed = FCIDump.from_file(path)
+        np.testing.assert_allclose(np.asarray(parsed.hijkl_ba.array), hijkl_ba, atol=1e-14)
+
+    def test_exchange_symmetry_violation(self):
+        """Test that 2-electron entries which violate the electron exchange symmetry are
+        symmetrized with a warning, which does not change the 2-electron operator."""
+        lines = [
+            "&FCI NORB=2, NELEC=2, MS2=0, ST=1,",
+            "&END",
+            "0.50 1 1 1 1",
+            "0.40 2 2 2 2",
+            "0.30 1 2 2 1",
+            "0.10 2 1 1 2",
+            "-1.0 1 1 0 0",
+            "-0.5 2 2 0 0",
+            "0.05 1 2 0 0",
+            "0.02 2 1 0 0",
+            "0.7 0 0 0 0",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "FCIDUMP"
+            path.write_text("\n".join(lines) + "\n", encoding="utf8")
+            with self.assertLogs("qiskit_nature.second_q.formats.fcidump.parser", "WARNING"):
+                parsed = FCIDump.from_file(path)
+        eri = np.asarray(parsed.hijkl.array)
+        self.assertAlmostEqual(eri[0, 1, 1, 0], 0.2)
+        self.assertAlmostEqual(eri[1, 0, 0, 1], 0.2)
+        listed = np.zeros((2,) * 4)
+        listed[0, 0, 0, 0], listed[1, 1, 1, 1], listed[0, 1, 1, 0], listed[1, 0, 0, 1] = (
+            0.5,
+            0.4,
+            0.3,
+            0.1,
+        )
+        unsymmetrized = ElectronicEnergy.from_raw_integrals(parsed.hij, S1Integrals(listed))
+        symmetrized = ElectronicEnergy.from_raw_integrals(parsed.hij, parsed.hijkl)
+        difference = (unsymmetrized.second_q_op() - symmetrized.second_q_op()).normal_order()
+        self.assertEqual(len(difference.simplify()), 0)
+
+    def test_invalid_files(self):
+        """Test that malformed files raise errors."""
+        header = "&FCI NORB=2, NELEC=2, MS2=0,\n&END\n"
+        cases = {
+            "missing header end": "&FCI NORB=2, NELEC=2, MS2=0,\n0.5 1 1 1 1\n",
+            "four tokens": header + "0.5 1 1 1\n",
+            "1-electron index": header + "0.5 1 3 0 0\n",
+            "2-electron index": header + "0.5 1 1 3 1\n",
+            "mixed-spin index": "&FCI NORB=2, NELEC=2, MS2=0, IUHF=1,\n&END\n0.5 3 1 1 1\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, text in cases.items():
+                with self.subTest(name):
+                    path = Path(tmp) / "FCIDUMP"
+                    path.write_text(text, encoding="utf8")
+                    with self.assertRaises(QiskitNatureError):
+                        FCIDump.from_file(path)
+
+    def test_adjoint_flag(self):
+        """Test that the ADJOINT=1 header entry is kept and reported."""
+        text = "&FCI NORB=1, NELEC=2, MS2=0, ST=1, ADJOINT=1,\n&END\n0.5 1 1 1 1\n-1.0 1 1 0 0\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "FCIDUMP"
+            path.write_text(text, encoding="utf8")
+            with self.assertLogs("qiskit_nature.second_q.formats.fcidump.parser", "INFO"):
+                parsed = FCIDump.from_file(path)
+        self.assertEqual(parsed.metadata.get("ADJOINT"), 1)
 
     def test_hermitian_header_contradiction(self):
         """Test that ST=0 raises for integrals without the 8-fold symmetry."""
@@ -268,6 +364,18 @@ class TestTCDump(QiskitNatureTestCase):
                     self.assertEqual(num_lines, 1 + (141 if symmetry_reduced else 2227))
                     parsed = TCDump.from_file(path)
                     np.testing.assert_array_equal(parsed.three_body.to_dense(), dense)
+
+    def test_file_without_header(self):
+        """Test a TCDUMP file without the header line, with blank lines, and a missing file."""
+        text = "\n 5.0E-01  1  1  1  1  1  1\n\n 2.5E-01  1  2  1  2  1  1\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "TCDUMP"
+            path.write_text(text, encoding="utf8")
+            tcdump = TCDump.from_file(path)
+            with self.assertRaises(QiskitNatureError):
+                TCDump.from_file(Path(tmp) / "missing")
+        self.assertEqual(tcdump.num_orbitals, 2)
+        self.assertAlmostEqual(tcdump.three_body[0, 1, 0, 1, 0, 0], 0.25)
 
     def test_inconsistent_number_of_orbitals(self):
         """Test that a mismatch with the header raises."""

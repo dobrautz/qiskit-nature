@@ -106,8 +106,13 @@ class StatevectorImaginaryMcLachlanPrinciple(ImaginaryVariationalPrinciple):
     ``rzz``), phase gates, :class:`~qiskit.circuit.library.PauliEvolutionGate` instances and
     parameter-free gates. Other instructions are decomposed. The gate angles must depend linearly
     on the parameters. A :class:`~qiskit.circuit.library.PauliEvolutionGate` is simulated as the
-    product of the exponentials of its terms, which is exact if its terms commute (as for unitary
-    coupled cluster ansätze) and otherwise corresponds to its first-order Lie-Trotter synthesis.
+    circuit its synthesis produces, which is what a transpiled circuit executes: the product of the
+    exponentials of its terms if they commute (as for unitary coupled cluster ansätze; then this is
+    the exact exponential), otherwise the Lie-Trotter product with the number of repetitions of its
+    synthesis, or the gate's definition for other synthesis methods. Note that
+    :class:`~qiskit.quantum_info.Statevector`, and hence the
+    :class:`~qiskit.primitives.StatevectorEstimator`, uses the exact exponential instead, which
+    differs from the synthesized circuit for non-commuting terms.
 
     The memory and runtime requirements scale as :math:`(P+1) 2^n` and
     :math:`N_\mathrm{gates} (P+1) 2^n`, respectively, for :math:`n` qubits and :math:`P`

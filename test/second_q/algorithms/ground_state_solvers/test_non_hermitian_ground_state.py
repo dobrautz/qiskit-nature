@@ -20,6 +20,7 @@ import numpy as np
 from qiskit import generate_preset_pass_manager
 from qiskit.primitives import StatevectorEstimator
 from qiskit.providers.fake_provider import GenericBackendV2
+from qiskit.circuit import Parameter
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_algorithms import (
     MinimumEigensolver,
@@ -41,6 +42,7 @@ from qiskit_nature.second_q.formats import fcidump_to_problem
 from qiskit_nature.second_q.formats.fcidump import FCIDump
 from qiskit_nature.second_q.formats.tcdump import TCDump
 from qiskit_nature.second_q.mappers import ParityMapper
+from qiskit_nature.second_q.problems import EigenstateResult
 
 DATA = Path(__file__).parents[2] / "formats" / "tcdump"
 
@@ -50,6 +52,20 @@ H2_TC_ENERGY = -1.1717073880
 
 class _MinimumEigensolverWithoutAnsatz(MinimumEigensolver):
     """A minimum eigensolver which neither supports non-Hermitian operators nor has an ansatz."""
+
+    def compute_minimum_eigenvalue(self, operator, aux_operators=None):
+        return MinimumEigensolverResult()
+
+
+class _MinimumEigensolverWithoutAux(MinimumEigensolver):
+    """A minimum eigensolver with an ansatz which does not support auxiliary operators."""
+
+    def __init__(self, ansatz):
+        self.ansatz = ansatz
+
+    @classmethod
+    def supports_aux_operators(cls):
+        return False
 
     def compute_minimum_eigenvalue(self, operator, aux_operators=None):
         return MinimumEigensolverResult()
@@ -167,6 +183,30 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         solver = GroundStateEigensolver(mapper, VQE(StatevectorEstimator(), ansatz, SLSQP()))
         result = solver.solve(problem)
         self.assertNotIsInstance(result.raw_result, VarQITEMinimumEigensolverResult)
+
+    def test_aux_operators_with_replacement_solver(self):
+        """Test that the auxiliary operators are evaluated by the VarQITE which replaces a solver
+        without support for them."""
+        solver = GroundStateEigensolver(self.mapper, _MinimumEigensolverWithoutAux(self.ansatz))
+        with self.assertWarns(UserWarning):
+            result = solver.solve(self.problem)
+        self.assertIsNotNone(result.aux_operators_evaluated)
+        self.assertAlmostEqual(result.num_particles[0], sum(self.problem.num_particles), places=6)
+
+    def test_hermiticity_check_of_other_types(self):
+        """Test that operators which cannot be inspected count as Hermitian."""
+        self.assertTrue(is_hermitian_qubit_operator(SparsePauliOp(["X"], [Parameter("a")])))
+        self.assertTrue(is_hermitian_qubit_operator(None))
+
+    def test_interpret_warns_about_complex_eigenvalues(self):
+        """Test that discarding non-negligible imaginary parts of eigenvalues is reported."""
+        result = EigenstateResult()
+        result.eigenvalues = np.array([-1.0 + 0.01j])
+        with self.assertLogs(
+            "qiskit_nature.second_q.problems.electronic_structure_problem", "WARNING"
+        ):
+            interpreted = self.problem.interpret(result)
+        self.assertAlmostEqual(interpreted.computed_energies[0], -1.0)
 
     def test_var_qite_aux_operators(self):
         """Test the evaluation of auxiliary operators by the VarQITE minimum eigensolver."""
