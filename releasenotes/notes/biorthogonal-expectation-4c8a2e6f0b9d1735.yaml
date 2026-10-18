@@ -1,0 +1,11 @@
+---
+features:
+  - |
+    Added :func:`.biorthogonal_expectation_value`, which computes
+    :math:`\langle L|H|R\rangle / \langle L|R\rangle` for a left and a right state of the same
+    ansatz, exactly or with an estimator, and :func:`.transition_circuit`, which prepares the
+    superposition of both states with an ancilla qubit for this measurement. The circuit contains
+    only one controlled rotation per parameterized rotation of the ansatz. The error of the
+    biorthogonal energy of approximate eigenvectors is of second order, but it requires that the
+    left eigenvector, obtained by a VarQITE of :math:`H^\dagger`, is well represented by the
+    ansatz.

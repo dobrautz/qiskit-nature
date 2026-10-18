@@ -100,6 +100,17 @@ sector of fixed particle numbers (requires ``ffsim``).
 
    FermionicVarQITESolver
 
+Biorthogonal expectation values of non-Hermitian operators, e.g. the energy
+:math:`\\langle L|H|R\\rangle / \\langle L|R\\rangle` of approximate left and right eigenvectors, and the
+circuit for measuring them.
+
+.. autosummary::
+   :toctree: ../stubs/
+   :nosignatures:
+
+   biorthogonal_expectation_value
+   transition_circuit
+
 Initial Points
 ++++++++++++++
 When using variational algorithms such as the :class:`~qiskit_algorithms.VQE`
@@ -135,6 +146,8 @@ from .ground_state_solvers import (
     parameter_layers,
     FermionicVarQITESolver,
     is_hermitian_qubit_operator,
+    biorthogonal_expectation_value,
+    transition_circuit,
 )
 
 __all__ = [
@@ -153,4 +166,6 @@ __all__ = [
     "parameter_layers",
     "FermionicVarQITESolver",
     "is_hermitian_qubit_operator",
+    "biorthogonal_expectation_value",
+    "transition_circuit",
 ]

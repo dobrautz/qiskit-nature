@@ -28,6 +28,7 @@ from .var_qite_minimum_eigensolver import (
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
 from .approximate_metric_principle import ApproximateMetricPrinciple, parameter_layers
 from .fermionic_var_qite_solver import FermionicVarQITESolver
+from .biorthogonal import biorthogonal_expectation_value, transition_circuit
 
 __all__ = [
     "GroundStateSolver",
@@ -39,5 +40,7 @@ __all__ = [
     "ApproximateMetricPrinciple",
     "parameter_layers",
     "FermionicVarQITESolver",
+    "biorthogonal_expectation_value",
+    "transition_circuit",
     "is_hermitian_qubit_operator",
 ]
