@@ -1,0 +1,28 @@
+---
+features:
+  - |
+    Added the :class:`.ReferenceStateMitigatedPrinciple`, which applies reference-state error
+    mitigation (REM, MREM) to the gradient measured at every VarQITE time step: its noise bias is
+    measured once at a reference state with classically known exact values and subtracted at
+    every step, which reduces the shift of the converged state caused by non-unital noise such as
+    amplitude damping. The reference must be a stationary point of the exact equations of motion
+    (e.g. a Hartree-Fock state with hardware-efficient layers, or a symmetry-adapted
+    multireference state), since otherwise the correction itself shifts the converged state; the
+    principle checks this and disables the correction with a warning for non-stationary
+    references, such as a :class:`.UCC` ansatz at ``theta = 0``. The correction removes the bias
+    at the converged state only if that state stays close to the reference. Since the offset is
+    measured once, its statistical error is a constant bias of every step and must be well below
+    the bias it removes: it can be averaged over ``num_reference_evaluations`` evaluations (with a
+    warning if it is not significant) or measured with a more precise ``reference_principle``.
+  - |
+    Added the :class:`.OverlapMetricPrinciple`, which measures the VarQITE metric from the overlaps
+    :math:`|\langle\psi(\theta)|\psi(\theta + s)\rangle|^2` of compute-uncompute circuits with a
+    sampler, using exact (generalized) parameter-shift rules for Pauli rotations, controlled
+    rotations, phase gates and Pauli evolutions such as the excitations of a :class:`.UCC` ansatz
+    (see :func:`.parameter_frequencies`). All overlaps of an evaluation are divided by the
+    measured overlap of the unshifted circuit, whose exact value is one. This built-in reference
+    reduces the damping of the overlaps by gate noise and readout errors, which makes the metric
+    more accurate than the LinComb metric for shallow circuits (no gain remained for a circuit of
+    about 130 CNOT gates, since the compute-uncompute circuits are twice as deep as the ansatz).
+    With shot noise, the regularization of the equations of motion matters more than the metric:
+    with a sufficient Tikhonov shift, the trajectories with the LinComb metric were as accurate.
