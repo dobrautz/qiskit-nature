@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2021, 2023.
+# (C) Copyright IBM 2021, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -21,6 +21,7 @@ Hamiltonians (:mod:`qiskit_nature.second_q.hamiltonians`)
    ElectronicEnergy
    VibrationalEnergy
    FermiHubbardModel
+   TranscorrelatedFermiHubbardModel
    HeisenbergModel
    IsingModel
    LatticeModel
@@ -40,6 +41,7 @@ from .quadratic_hamiltonian import QuadraticHamiltonian
 from .electronic_energy import ElectronicEnergy
 from .vibrational_energy import VibrationalEnergy
 from .fermi_hubbard_model import FermiHubbardModel
+from .transcorrelated_fermi_hubbard_model import TranscorrelatedFermiHubbardModel
 from .heisenberg_model import HeisenbergModel
 from .ising_model import IsingModel
 from .lattice_model import LatticeModel
@@ -50,6 +52,7 @@ __all__ = [
     "ElectronicEnergy",
     "VibrationalEnergy",
     "FermiHubbardModel",
+    "TranscorrelatedFermiHubbardModel",
     "HeisenbergModel",
     "IsingModel",
     "LatticeModel",

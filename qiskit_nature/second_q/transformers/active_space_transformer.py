@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2021, 2025.
+# (C) Copyright IBM 2021, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -586,9 +586,18 @@ def _transform_electronic_energy(
         reference_inactive_energy: the reference inactive energy. If not provided, it will be
             computed from the ``reference_inactive_fock`` integrals and total electronic density.
 
+    Raises:
+        NotImplementedError: if the hamiltonian contains three-body integrals.
+
     Returns:
         The transformed hamiltonian.
     """
+    if hamiltonian.three_body is not None:
+        raise NotImplementedError(
+            "The reduction of three-body integrals to an active space is not supported yet. "
+            "Provide the integrals of the active space (e.g., frozen-core FCIDUMP and TCDUMP "
+            "files) instead."
+        )
     if reference_inactive_fock is None:
         reference_inactive_fock = hamiltonian.fock(density_total)
 

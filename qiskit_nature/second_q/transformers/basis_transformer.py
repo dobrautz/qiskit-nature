@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2022, 2023.
+# (C) Copyright IBM 2022, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -226,6 +226,10 @@ class BasisTransformer(BaseTransformer):
 
     def transform_hamiltonian(self, hamiltonian: Hamiltonian) -> Hamiltonian:
         if isinstance(hamiltonian, ElectronicEnergy):
+            if hamiltonian.three_body is not None:
+                raise NotImplementedError(
+                    "The basis transformation of three-body integrals is not supported yet."
+                )
             integrals = hamiltonian.electronic_integrals
             hamiltonian.electronic_integrals = self.transform_electronic_integrals(integrals)
             return hamiltonian

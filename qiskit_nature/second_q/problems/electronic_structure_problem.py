@@ -1,6 +1,6 @@
 # This code is part of a Qiskit project.
 #
-# (C) Copyright IBM 2021, 2023.
+# (C) Copyright IBM 2021, 2026.
 #
 # This code is licensed under the Apache License, Version 2.0. You may
 # obtain a copy of this license in the LICENSE.txt file in the root directory
@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import cast, Callable, List, Optional, Union, TYPE_CHECKING
 
@@ -36,6 +37,8 @@ from .eigenstate_result import EigenstateResult
 
 from .base_problem import BaseProblem
 from .electronic_basis import ElectronicBasis
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
@@ -239,6 +242,15 @@ class ElectronicStructureProblem(BaseProblem):
         for prop in self.properties:
             if isinstance(prop, Interpretable):
                 prop.interpret(result)
+        eigenvalues = np.asarray(eigenstate_result.eigenvalues)
+        if np.iscomplexobj(eigenvalues) and np.any(np.abs(eigenvalues.imag) > 1e-6):
+            LOGGER.warning(
+                "The computed eigenvalues have non-negligible imaginary parts (max. %.2e), which "
+                "are discarded. This can happen for non-Hermitian Hamiltonians, e.g. "
+                "transcorrelated ones. The complex eigenvalues are available through the "
+                "`eigenvalues` attribute of the result.",
+                np.max(np.abs(eigenvalues.imag)),
+            )
         result.computed_energies = np.asarray([e.real for e in eigenstate_result.eigenvalues])
         if self.reference_energy is not None:
             result.hartree_fock_energy = self.reference_energy
