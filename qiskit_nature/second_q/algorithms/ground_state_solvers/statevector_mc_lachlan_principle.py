@@ -29,6 +29,9 @@ from qiskit_algorithms.time_evolvers.variational import ImaginaryVariationalPrin
 
 from qiskit_nature import QiskitNatureError
 
+# SparsePauliOp.from_sparse_observable exists from Qiskit 2.0 on
+_HAS_SPARSE_OBSERVABLE_CONVERSION = hasattr(SparsePauliOp, "from_sparse_observable")
+
 _ROTATIONS = {"rx": "X", "ry": "Y", "rz": "Z", "rxx": "XX", "ryy": "YY", "rzz": "ZZ"}
 """Gates of the form exp(-i theta/2 P) for a Pauli string P (acting on the gate's qubits)."""
 
@@ -291,7 +294,7 @@ class StatevectorImaginaryMcLachlanPrinciple(ImaginaryVariationalPrinciple):
         if self._matrix_cache is not None and self._matrix_cache[0] is hamiltonian:
             return self._matrix_cache[1]
         if isinstance(hamiltonian, SparseObservable):
-            matrix = SparsePauliOp.from_sparse_observable(hamiltonian).to_matrix(sparse=True)
+            matrix = _sparse_pauli_op(hamiltonian).to_matrix(sparse=True)
         elif isinstance(hamiltonian, SparsePauliOp):
             matrix = hamiltonian.to_matrix(sparse=True)
         else:
@@ -380,7 +383,7 @@ def _compile_pauli_evolution(
     terms: list[tuple[str, float]] = []
     for operator in operators:
         if isinstance(operator, SparseObservable):
-            operator = SparsePauliOp.from_sparse_observable(operator)
+            operator = _sparse_pauli_op(operator)
         if not isinstance(operator, SparsePauliOp):
             return False
         coeffs = np.real_if_close(operator.coeffs)
@@ -500,3 +503,13 @@ def _apply_matrix(states: np.ndarray, operation: _Matrix, num_qubits: int) -> np
     result = np.tensordot(matrix, tensor, axes=(list(range(num_targets, 2 * num_targets)), targets))
     result = np.moveaxis(result, list(range(num_targets)), targets)
     return result.reshape(num_rows, -1)
+
+
+def _sparse_pauli_op(observable: SparseObservable) -> SparsePauliOp:
+    """Converts a :class:`~qiskit.quantum_info.SparseObservable`, which requires Qiskit 2.0 or newer."""
+    if not _HAS_SPARSE_OBSERVABLE_CONVERSION:
+        raise QiskitNatureError(
+            "Operators given as a SparseObservable require Qiskit 2.0 or newer. Pass a SparsePauliOp "
+            "instead."
+        )
+    return SparsePauliOp.from_sparse_observable(observable)

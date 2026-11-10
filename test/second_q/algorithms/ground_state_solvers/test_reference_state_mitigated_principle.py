@@ -13,8 +13,13 @@
 """Test the ReferenceStateMitigatedPrinciple."""
 
 import unittest
+import warnings
 from pathlib import Path
 from test import QiskitNatureTestCase
+from test.second_q.algorithms.ground_state_solvers.qiskit_algorithms_support import (
+    HAS_NON_HERMITIAN_VARQITE,
+    SKIP_VARQITE,
+)
 
 import numpy as np
 from qiskit.circuit.library import efficient_su2
@@ -54,6 +59,21 @@ class BiasedPrinciple(StatevectorImaginaryMcLachlanPrinciple):
         self.num_gradient_calls += 1
         exact = super().evolution_gradient(hamiltonian, ansatz, param_values, gradient_params)
         return self.damping * exact + self.gradient_bias
+
+
+class NoisyPrinciple(StatevectorImaginaryMcLachlanPrinciple):
+    """An exact principle with a constant bias of the gradient and independent Gaussian noise in
+    every evaluation."""
+
+    def __init__(self, gradient_bias, noise, seed):
+        super().__init__()
+        self.gradient_bias = gradient_bias
+        self.noise = noise
+        self.rng = np.random.default_rng(seed)
+
+    def evolution_gradient(self, hamiltonian, ansatz, param_values, gradient_params=None):
+        exact = super().evolution_gradient(hamiltonian, ansatz, param_values, gradient_params)
+        return exact + self.gradient_bias + self.noise * self.rng.normal(size=len(exact))
 
 
 class TestReferenceStateMitigatedPrinciple(QiskitNatureTestCase):
@@ -112,6 +132,7 @@ class TestReferenceStateMitigatedPrinciple(QiskitNatureTestCase):
             exact.metric_tensor(self.ansatz, self.values) + self.metric_bias,
         )
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_converged_state(self):
         """Test that the biased evolution converges to the exact state after mitigation."""
         reference = VarQITEMinimumEigensolver(self.ansatz).compute_minimum_eigenvalue(self.operator)
@@ -150,6 +171,7 @@ class TestReferenceStateMitigatedPrinciple(QiskitNatureTestCase):
         )
         np.testing.assert_allclose(forced.gradient_offset, expected, atol=1e-12)
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_stationary_reference_point(self):
         """Test a UCCSD ansatz with the (stationary) converged point as reference."""
         reference = VarQITEMinimumEigensolver(
@@ -165,6 +187,7 @@ class TestReferenceStateMitigatedPrinciple(QiskitNatureTestCase):
         self.assertTrue(principle.gradient_correction_active)
         self.assertAlmostEqual(result.eigenvalue, reference.eigenvalue, delta=1e-6)
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_noiseless_estimator(self):
         """Test that the offsets vanish for an exact estimator."""
         estimator = StatevectorEstimator()
@@ -177,6 +200,44 @@ class TestReferenceStateMitigatedPrinciple(QiskitNatureTestCase):
         self.assertTrue(principle.gradient_correction_active)
         np.testing.assert_allclose(principle.gradient_offset, 0.0, atol=1e-10)
         np.testing.assert_allclose(principle.metric_offset, 0.0, atol=1e-10)
+
+    def test_offset_significance(self):
+        """Test the statistical error of the offset and the warning if it is not significant."""
+        size = self.ansatz.num_parameters
+        # a small bias measured with few noisy evaluations: the offset is mostly noise
+        principle = ReferenceStateMitigatedPrinciple(
+            NoisyPrinciple(1e-3 * np.ones(size), 1e-2, seed=1), num_reference_evaluations=4
+        )
+        with self.assertWarnsRegex(UserWarning, "not significant"):
+            principle.evolution_gradient(self.operator, self.ansatz, self.values)
+        self.assertAlmostEqual(
+            principle.gradient_offset_error, 1e-2 * np.sqrt(size / 4), delta=0.01
+        )
+        # a large bias: no warning
+        principle = ReferenceStateMitigatedPrinciple(
+            NoisyPrinciple(0.1 * np.ones(size), 1e-2, seed=1), num_reference_evaluations=4
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            principle.evolution_gradient(self.operator, self.ansatz, self.values)
+        # a single evaluation has no error estimate
+        principle = ReferenceStateMitigatedPrinciple(BiasedPrinciple(self.gradient_bias, 0.0))
+        principle.evolution_gradient(self.operator, self.ansatz, self.values)
+        self.assertIsNone(principle.gradient_offset_error)
+
+    def test_reference_principle(self):
+        """Test that a separate principle measures the offsets at the reference."""
+        biased = BiasedPrinciple(self.gradient_bias, 0.0)
+        reference = BiasedPrinciple(self.gradient_bias, self.metric_bias)
+        principle = ReferenceStateMitigatedPrinciple(
+            biased, mitigate_metric=True, reference_principle=reference
+        )
+        principle.evolution_gradient(self.operator, self.ansatz, self.values)
+        principle.metric_tensor(self.ansatz, self.values)
+        self.assertEqual(biased.num_gradient_calls, 1)
+        self.assertEqual(reference.num_gradient_calls, 1)
+        np.testing.assert_allclose(principle.gradient_offset, self.gradient_bias, atol=1e-12)
+        np.testing.assert_allclose(principle.metric_offset, self.metric_bias, atol=1e-12)
 
     def test_reference_evaluations_and_reset(self):
         """Test the averaging of the reference evaluations and the reset of the offsets."""

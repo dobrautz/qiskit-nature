@@ -435,10 +435,10 @@ class FermionicVarQITESolver(GroundStateSolver):
                 "JordanWignerMapper, an initial state circuit."
             )
         # ffsim orders the spin orbitals as the Jordan-Wigner mapping of qiskit-nature (spin-up
-        # orbitals first), such that the conversion only selects the amplitudes of the sector
-        reference = ffsim.qiskit.qiskit_vec_to_ffsim_vec(
-            Statevector(initial_state).data, norb, nelec
-        )
+        # orbitals first), such that the state in the sector consists of the amplitudes of the
+        # sector's bit strings (as ffsim.qiskit.qiskit_vec_to_ffsim_vec, which needs Qiskit 2.0)
+        strings = ffsim.addresses_to_strings(range(ffsim.dim(norb, nelec)), norb, nelec)
+        reference = Statevector(initial_state).data[strings]
         if abs(np.vdot(reference, reference) - 1) > 1e-8:
             raise QiskitNatureError(
                 f"The initial state does not lie in the sector of {nelec} particles."

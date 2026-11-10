@@ -85,6 +85,7 @@ non-Hermitian (e.g. transcorrelated) Hamiltonians, and its result.
 
    VarQITEMinimumEigensolver
    VarQITEMinimumEigensolverResult
+   tikhonov_solver
    StatevectorImaginaryMcLachlanPrinciple
    ApproximateMetricPrinciple
    parameter_layers
@@ -142,6 +143,7 @@ from .ground_state_solvers import (
     GroundStateSolver,
     VarQITEMinimumEigensolver,
     VarQITEMinimumEigensolverResult,
+    tikhonov_solver,
     StatevectorImaginaryMcLachlanPrinciple,
     ApproximateMetricPrinciple,
     parameter_layers,
@@ -164,6 +166,7 @@ __all__ = [
     "GroundStateSolver",
     "VarQITEMinimumEigensolver",
     "VarQITEMinimumEigensolverResult",
+    "tikhonov_solver",
     "StatevectorImaginaryMcLachlanPrinciple",
     "ApproximateMetricPrinciple",
     "parameter_layers",

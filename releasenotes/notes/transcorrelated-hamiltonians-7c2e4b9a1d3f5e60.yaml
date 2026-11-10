@@ -31,29 +31,6 @@ features:
 
         problem = fcidump_to_problem(FCIDump.from_file("FCIDUMP"), TCDump.from_file("TCDUMP"))
   - |
-    Added the :class:`.VarQITEMinimumEigensolver`, a minimum eigensolver based on variational
-    quantum imaginary time evolution, which also supports non-Hermitian Hamiltonians. It converges
-    to the right eigenvector whose eigenvalue has the lowest real part. By default, the equations
-    of motion are integrated with forward Euler steps of ``timestep=0.05`` until the norm of the
-    parameter derivative falls below ``convergence_threshold=1e-6`` (see
-    :attr:`.VarQITEMinimumEigensolverResult.converged`), which is robust also for ansätze with
-    nearly singular metric tensors, such as hardware-efficient ones. For exact simulations, it
-    uses the new :class:`.StatevectorImaginaryMcLachlanPrinciple`, which propagates the state and
-    all its parameter derivatives through the circuit in a single pass and is orders of magnitude
-    faster than evaluating gradient circuits with estimator primitives. For estimators with shot
-    noise, a regularized solution of the linear system (singular value cutoff of ``1e-2``) and a
-    fixed evolution time are used by default. The ``transpiler`` argument compiles the gradient,
-    quantum geometric tensor and observable circuits for the backend of the estimator, which
-    enables the use of simulators (e.g. those of Qiskit Aer, including noisy and matrix product
-    state simulations) and of hardware backends via Qiskit IBM Runtime.
-  - |
-    Added the :class:`.FermionicVarQITESolver`, which simulates the VarQITE of unitary coupled
-    cluster ansätze exactly in the sector of fixed particle numbers using the optional `ffsim
-    <https://github.com/qiskit-community/ffsim>`_ library. Since this sector is much smaller than
-    the qubit Hilbert space, larger systems can be treated, e.g. H2 in the cc-pVDZ basis (20
-    qubits) in a few seconds. The parameters agree with those of the qubit circuit of the
-    :class:`.UCC` ansatz.
-  - |
     Added the :class:`.TranscorrelatedFermiHubbardModel`, the Hubbard model of a one-dimensional
     chain similarity transformed with a Gutzwiller correlator, :math:`e^{-\hat{g}} H e^{\hat{g}}`
     with :math:`\hat{g} = J \sum_i n_{i\uparrow} n_{i\downarrow}`, in the site basis or, for
@@ -67,57 +44,6 @@ features:
             TranscorrelatedFermiHubbardModel(6, hopping=1.0, onsite_interaction=4.0,
                                              correlation=-0.59, basis="momentum")
         )
-  - |
-    The :class:`.FermionicVarQITESolver` now also solves problems other than
-    :class:`.ElectronicStructureProblem`, e.g. a :class:`.LatticeModelProblem`, supports initial
-    states other than the :class:`.HartreeFock` state (e.g. a :class:`.SlaterDeterminant`) for the
-    :class:`.JordanWignerMapper`, can evolve with the adjoint Hamiltonian (``adjoint=True``) to
-    approximate the left eigenvector, and computes the biorthogonal energy of a left and a right
-    state with :meth:`.FermionicVarQITESolver.biorthogonal_energy`.
-  - |
-    Added :func:`.biorthogonal_expectation_value`, which computes
-    :math:`\langle L|H|R\rangle / \langle L|R\rangle` for a left and a right state of the same
-    ansatz, exactly or with an estimator, and :func:`.transition_circuit`, which prepares the
-    superposition of both states with an ancilla qubit for this measurement. The circuit contains
-    only one controlled rotation per parameterized rotation of the ansatz. The error of the
-    biorthogonal energy of approximate eigenvectors is of second order, but it requires that the
-    left eigenvector, obtained by a VarQITE of :math:`H^\dagger`, is well represented by the
-    ansatz.
-  - |
-    Added the :class:`.ApproximateMetricPrinciple`, which reduces the number of quantum geometric
-    tensor circuits of a VarQITE by evaluating only the block-diagonal (see
-    :func:`.parameter_layers`) or diagonal part of the metric, by reusing it for several time
-    steps, and by updating it with the rank-one qBroyden rule of Fitzek et al., Quantum 8, 1313
-    (2024), without further circuits. Since the stationary points of the equations of motion do
-    not depend on the metric, the evolution converges to the same state.
-  - |
-    Added the :class:`.ReferenceStateMitigatedPrinciple`, which applies reference-state error
-    mitigation (REM, MREM) to the gradient measured at every VarQITE time step: its noise bias is
-    measured once at a reference state with classically known exact values and subtracted at
-    every step, which reduces the shift of the converged state caused by non-unital noise such as
-    amplitude damping. The reference must be a stationary point of the exact equations of motion
-    (e.g. a Hartree-Fock state with hardware-efficient layers, or a symmetry-adapted
-    multireference state), since otherwise the correction itself shifts the converged state; the
-    principle checks this and disables the correction with a warning for non-stationary
-    references, such as a :class:`.UCC` ansatz at ``theta = 0``.
-  - |
-    Added the :class:`.OverlapMetricPrinciple`, which measures the VarQITE metric from the overlaps
-    :math:`|\langle\psi(\theta)|\psi(\theta + s)\rangle|^2` of compute-uncompute circuits with a
-    sampler, using exact (generalized) parameter-shift rules for Pauli rotations, controlled
-    rotations, phase gates and Pauli evolutions such as the excitations of a :class:`.UCC` ansatz
-    (see :func:`.parameter_frequencies`). All overlaps of an evaluation are divided by the
-    measured overlap of the unshifted circuit, whose exact value is one. This built-in reference
-    reduces the damping of the overlaps by gate noise and readout errors, which made the metric,
-    and hence the VarQITE trajectory, up to several times more accurate than with the LinComb
-    metric in noisy simulations of shallow circuits (no gain remained for a circuit of about 130
-    CNOT gates, since the compute-uncompute circuits are twice as deep as the ansatz).
-  - |
-    :class:`.GroundStateEigensolver` now detects non-Hermitian Hamiltonians by the complex
-    coefficients of the Pauli representation of the mapped qubit operator (see also
-    :func:`.is_hermitian_qubit_operator`). Since estimator-based variational eigensolvers such as
-    the VQE cannot treat such Hamiltonians, a :class:`.VarQITEMinimumEigensolver` with the ansatz,
-    initial point and estimator of the configured solver is used instead (with a warning). A
-    different solver can be provided via the new ``non_hermitian_solver`` argument.
 fixes:
   - |
     Fixed the reconstruction of :attr:`.ElectronicIntegrals.alpha_beta` from

@@ -416,7 +416,9 @@ class TestTranscorrelatedHamiltonians(QiskitNatureTestCase):
         qubit_op = mapper.map(problem.hamiltonian.second_q_op())
         reference = read_qubit_hamiltonian(DATA / "lih_4nos_tc_parity_qubit_hamiltonian.txt")
         difference = (qubit_op - reference).simplify(atol=1e-12)
-        self.assertLess(np.max(np.abs(difference.coeffs)), 2e-8)
+        # terms of about 1e-7 differ by up to 5e-8 between Qiskit versions, which round the small
+        # terms of the intermediate operators (SparsePauliOp.simplify) differently
+        self.assertLess(np.max(np.abs(difference.coeffs)), 1e-7)
 
     def test_be_three_body(self):
         """Test the Be Hamiltonian with explicit three-body terms."""

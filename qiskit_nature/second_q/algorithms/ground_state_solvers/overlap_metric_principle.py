@@ -56,20 +56,25 @@ class OverlapMetricPrinciple(ImaginaryVariationalPrinciple):
     evaluation are divided by it (``normalize=True``). This reduces the damping of the overlaps by
     gate noise and readout errors, which is to a good approximation the same for all circuits of
     an evaluation since they share their structure. In noisy simulations of shallow circuits (four
-    qubits, up to twelve CNOT gates), the metric obtained in this way gave VarQITE trajectories
-    about as accurate as with the exact metric, whereas the metric of the
-    :class:`~qiskit_algorithms.gradients.LinCombQGT` was up to several times less accurate; for a
-    circuit of about 130 CNOT gates (eight qubits) no gain remained, since the compute-uncompute
-    circuits are twice as deep as the ansatz. This limits the method to shallow circuits, and the number of circuits per evaluation, :math:`1 + \sum_k (2R_k - 1) +
-    \sum_{k<l} 4R_kR_l`, is about four times that of the LinComb metric for :math:`R = 1`. Only the
+    qubits, up to twelve CNOT gates) without shot noise, the metric obtained in this way was closer
+    to the exact metric than that of the :class:`~qiskit_algorithms.gradients.LinCombQGT`, and so
+    was the trajectory. With shot noise, the linear equations of motion have to be regularized, and
+    the regularization matters more than the metric: with a truncated singular value
+    decomposition, the overlap metric prevented failures of hardware-efficient ansätze, whereas
+    with a Tikhonov shift large enough to suppress the shot noise (see :func:`.tikhonov_solver`)
+    the trajectories with the LinComb metric were as accurate or more accurate. The metric does
+    not affect the converged state. For a circuit of about 130 CNOT gates (eight qubits), the more
+    accurate metric elements did not give a more accurate time derivative, since the
+    compute-uncompute circuits are twice as deep as the ansatz. The number of circuits per
+    evaluation, :math:`1 + \sum_k (2R_k - 1) + \sum_{k<l} 4R_kR_l`, is about four times that of
+    the LinComb metric for :math:`R = 1`. Only the
     diagonal blocks given by ``blocks`` can be evaluated to reduce it, which however changes the
     trajectory.
 
     The gradient is taken from the wrapped ``principle`` (e.g. an
     :class:`~qiskit_algorithms.time_evolvers.variational.ImaginaryMcLachlanPrinciple` or a
-    :class:`.ReferenceStateMitigatedPrinciple`). With shot noise, the linear equations should be
-    solved with a singular value cutoff of about :math:`10^{-2}`, as done by default by the
-    :class:`.VarQITEMinimumEigensolver` for estimators with shot noise.
+    :class:`.ReferenceStateMitigatedPrinciple`). With shot noise, the linear equations must be
+    regularized; see ``lse_solver`` of the :class:`.VarQITEMinimumEigensolver`.
     """
 
     # pylint: disable=too-many-positional-arguments
@@ -121,7 +126,7 @@ class OverlapMetricPrinciple(ImaginaryVariationalPrinciple):
         """
         return len(self._setup(ansatz)["shifts"])
 
-    def metric_tensor(  # type: ignore[override]
+    def metric_tensor(  # type: ignore[override, unused-ignore]
         self, ansatz: QuantumCircuit, param_values: Sequence[float]
     ) -> np.ndarray:
         setup = self._setup(ansatz)

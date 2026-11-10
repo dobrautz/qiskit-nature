@@ -149,7 +149,7 @@ class ApproximateMetricPrinciple(ImaginaryVariationalPrinciple):
         if callable(reset):
             reset()  # pylint: disable=not-callable
 
-    def metric_tensor(  # type: ignore[override]
+    def metric_tensor(  # type: ignore[override, unused-ignore]
         self, ansatz: QuantumCircuit, param_values: Sequence[float]
     ) -> np.ndarray:
         if ansatz is not self._ansatz:

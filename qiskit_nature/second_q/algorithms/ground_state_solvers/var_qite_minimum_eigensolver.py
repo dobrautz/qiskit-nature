@@ -189,9 +189,11 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
                 forward Euler integration with the given ``timestep`` and
                 ``convergence_threshold`` is used.
             lse_solver: The solver of the linear system of equations, see
-                :class:`~qiskit_algorithms.VarQITE`. If ``None``, ``numpy.linalg.lstsq`` is used
-                with a relative cutoff for the singular values of ``1e-7`` for exact simulations
-                and of ``1e-2`` otherwise, which prevents the amplification of shot noise.
+                :class:`~qiskit_algorithms.VarQITE`. If ``None``, ``numpy.linalg.lstsq`` with a
+                relative cutoff for the singular values of ``1e-7`` is used for exact
+                simulations, and otherwise a Tikhonov shift of ``0.1`` (see
+                :func:`.tikhonov_solver`), which prevents the amplification of shot noise while
+                keeping the stationary points of the evolution.
             num_timesteps: The number of time steps of the
                 :class:`~qiskit_algorithms.time_evolvers.variational.ForwardEulerSolver`, if it is
                 given as ``ode_solver``, see :class:`~qiskit_algorithms.VarQITE`.
@@ -295,7 +297,7 @@ class VarQITEMinimumEigensolver(MinimumEigensolver):
         lse_solver = self.lse_solver
         if lse_solver is None:
             # a strong regularization is required to prevent the amplification of shot noise
-            lse_solver = _lstsq if exact_simulation else _lstsq_regularized
+            lse_solver = _lstsq if exact_simulation else tikhonov_solver()
 
         if self.implicit or self.line_search or self.trust_region is not None:
             evolution_result, converged = self._step_integration(
@@ -528,10 +530,42 @@ def _lstsq(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
     return np.linalg.lstsq(matrix, rhs, rcond=1e-7)[0]
 
 
-def _lstsq_regularized(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
-    """Solves the linear system in the least-squares sense with a relative singular value cutoff
-    of 1e-2, suitable for matrices and right-hand sides subject to shot noise."""
-    return np.linalg.lstsq(matrix, rhs, rcond=1e-2)[0]
+def tikhonov_solver(shift: float = 0.1) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    r"""A solver of the linear equations of motion with a Tikhonov shift.
+
+    The returned function solves :math:`(A + \lambda \mathbb{1})\,x = b` for the metric :math:`A`
+    and the right-hand side :math:`b` of the McLachlan equations of motion (or the matrix and the
+    right-hand side of an implicit step). It can be passed as ``lse_solver`` to the
+    :class:`.VarQITEMinimumEigensolver`, which uses it with the default shift for estimators with
+    shot noise.
+
+    With shot noise in the measured metric and gradient, the equations need a regularization. The
+    shift :math:`\lambda` must clearly exceed the noise in the eigenvalues of the measured metric
+    (about :math:`0.04` for 20 parameters at a precision of :math:`10^{-2}`); otherwise noisy
+    eigenvalues of :math:`A + \lambda \mathbb{1}` come close to zero and amplify the noise. The
+    shift keeps the stationary points :math:`b = 0` of the evolution and only slows the motion
+    along directions whose metric eigenvalues are below :math:`\lambda`. A cutoff of the small
+    singular values instead removes the components of :math:`b` along these directions, which
+    can stop the evolution away from a stationary point, e.g. close to a stationary reference
+    state.
+
+    Args:
+        shift: The Tikhonov shift :math:`\lambda`.
+
+    Returns:
+        A function ``(matrix, rhs) -> solution``.
+
+    Raises:
+        ValueError: If ``shift`` is not positive.
+    """
+    if shift <= 0:
+        raise ValueError(f"The shift must be positive, not {shift}.")
+
+    def solve(matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+        matrix = np.asarray(matrix)
+        return np.linalg.solve(matrix + shift * np.eye(matrix.shape[0]), np.asarray(rhs))
+
+    return solve
 
 
 def _converging_euler_solver(timestep: float, threshold: float | None) -> type[OdeSolver]:

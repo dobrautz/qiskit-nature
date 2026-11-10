@@ -15,6 +15,12 @@
 import unittest
 from pathlib import Path
 from test import QiskitNatureTestCase
+from test.second_q.algorithms.ground_state_solvers.qiskit_algorithms_support import (
+    HAS_NON_HERMITIAN_EIGENSOLVER,
+    HAS_NON_HERMITIAN_VARQITE,
+    SKIP_EIGENSOLVER,
+    SKIP_VARQITE,
+)
 
 import numpy as np
 from qiskit import generate_preset_pass_manager
@@ -36,6 +42,7 @@ from qiskit_nature.second_q.algorithms import (
     VarQITEMinimumEigensolver,
     VarQITEMinimumEigensolverResult,
     is_hermitian_qubit_operator,
+    tikhonov_solver,
 )
 from qiskit_nature.second_q.circuit.library import HartreeFock, UCCSD
 from qiskit_nature.second_q.formats import fcidump_to_problem
@@ -98,6 +105,7 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         qubit_op = self.mapper.map(self.problem.hamiltonian.second_q_op())
         self.assertFalse(is_hermitian_qubit_operator(qubit_op))
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_EIGENSOLVER, SKIP_EIGENSOLVER)
     def test_numpy_minimum_eigensolver(self):
         """Test the exact solver with the default filter criterion of the problem."""
         solver = GroundStateEigensolver(
@@ -132,6 +140,20 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         self.assertIsInstance(result.raw_result, VarQITEMinimumEigensolverResult)
         self.assertAlmostEqual(result.total_energies[0], H2_TC_ENERGY, delta=1e-5)
 
+    def test_tikhonov_solver(self):
+        """Test the Tikhonov-regularized solver of the equations of motion."""
+        rng = np.random.default_rng(5)
+        vectors = rng.normal(size=(4, 2))
+        metric = vectors @ vectors.T  # singular, as metrics often are
+        rhs = rng.normal(size=4)
+        solution = tikhonov_solver(0.1)(metric, rhs)
+        np.testing.assert_allclose((metric + 0.1 * np.eye(4)) @ solution, rhs, atol=1e-12)
+        # stationary points are kept
+        np.testing.assert_allclose(tikhonov_solver()(metric, np.zeros(4)), np.zeros(4))
+        with self.assertRaises(ValueError):
+            tikhonov_solver(0.0)
+
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_shot_based_var_qite(self):
         """Test the VarQITE with an estimator subject to shot noise."""
         estimator = StatevectorEstimator(default_precision=1e-3, seed=7)
@@ -141,6 +163,7 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         energy = result.eigenvalue + self.problem.hamiltonian.nuclear_repulsion_energy
         self.assertAlmostEqual(energy, H2_TC_ENERGY, delta=5e-3)
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_var_qite_with_transpiler(self):
         """Test the VarQITE with circuits transpiled for a backend with a non-trivial layout."""
         backend = GenericBackendV2(num_qubits=4, coupling_map=[[0, 3], [3, 2], [2, 1]], seed=3)
@@ -150,7 +173,8 @@ class TestNonHermitianGroundState(QiskitNatureTestCase):
         # the circuits are not placed on the physical qubits [0, 1]
         self.assertNotEqual(pass_manager.run(self.ansatz).layout.final_index_layout(), [0, 1])
         hamiltonian = self.mapper.map(self.problem.hamiltonian.second_q_op())
-        kwargs = {"time": 0.5, "convergence_threshold": None}
+        # the same solver for both runs: this test is about the transpilation, not the solver
+        kwargs = {"time": 0.5, "convergence_threshold": None, "lse_solver": tikhonov_solver()}
         reference = VarQITEMinimumEigensolver(self.ansatz, **kwargs).compute_minimum_eigenvalue(
             hamiltonian
         )

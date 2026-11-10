@@ -23,6 +23,7 @@ from .ground_state_eigensolver import GroundStateEigensolver, is_hermitian_qubit
 from .var_qite_minimum_eigensolver import (
     VarQITEMinimumEigensolver,
     VarQITEMinimumEigensolverResult,
+    tikhonov_solver,
 )
 from .statevector_mc_lachlan_principle import StatevectorImaginaryMcLachlanPrinciple
 from .approximate_metric_principle import ApproximateMetricPrinciple, parameter_layers
@@ -36,6 +37,7 @@ __all__ = [
     "GroundStateEigensolver",
     "VarQITEMinimumEigensolver",
     "VarQITEMinimumEigensolverResult",
+    "tikhonov_solver",
     "StatevectorImaginaryMcLachlanPrinciple",
     "ApproximateMetricPrinciple",
     "parameter_layers",

@@ -65,8 +65,28 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
     the metric is not a constant offset and is never zero at a reference state, so the offset
     correction of the metric (``mitigate_metric=True``) is a rough model which can also degrade the
     trajectory; it is disabled by default (see :class:`.OverlapMetricPrinciple` for a metric with a
-    built-in reference). The statistical error of the offsets enters every step, so they should be
-    measured precisely, e.g. by averaging ``num_reference_evaluations`` evaluations.
+    built-in reference).
+
+    The offsets are measured once, so their statistical error is not averaged over the time steps
+    like the shot noise of the gradient: it acts as a constant bias of the corrected gradient and
+    shifts the converged state. The correction helps only if this error is well below the noise bias
+    it removes, as a rule below a tenth of it. Since one evaluation has the shot noise of one
+    gradient evaluation, this can require hundreds to thousands of evaluations at the precision of a
+    time step when the gate noise is weak: either average ``num_reference_evaluations`` evaluations,
+    or pass a ``reference_principle`` that evaluates the reference with a higher precision. For
+    example, for a four-qubit ansatz with twelve parameters under the noise model of a
+    superconducting device, the bias of the gradient at the reference was about :math:`10^{-3}` in
+    norm, while the average of four evaluations at precision :math:`10^{-2}` had an error of
+    :math:`2 \cdot 10^{-2}`; with it, the corrected runs drifted further from the noise-free ones
+    than without the correction. With several evaluations, the statistical error of the gradient
+    offset is estimated (:attr:`gradient_offset_error`), and a warning is issued if the offset is
+    not significant.
+
+    The offset is the noise bias at the reference. It removes the bias at the converged state only
+    if the two agree, i.e. if the converged state stays close to the reference, e.g. a
+    multireference state of the character of the target state. For strongly correlated states far
+    from a Hartree-Fock reference, the bias at the converged state can be much larger than at the
+    reference and point in another direction, so the correction removes little of it.
 
     **References:**
 
@@ -89,6 +109,7 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
         mitigate_metric: bool = False,
         num_reference_evaluations: int = 1,
         reference_gradient_tolerance: float = 1e-6,
+        reference_principle: ImaginaryVariationalPrinciple | None = None,
     ) -> None:
         """
         Args:
@@ -100,12 +121,18 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
             mitigate_gradient: Whether to correct the gradient.
             mitigate_metric: Whether to correct the metric.
             num_reference_evaluations: The number of evaluations of the noisy quantities at the
-                reference point, whose average is used.
+                reference point, whose average is used. Its statistical error enters every time
+                step as a constant bias, see above.
             reference_gradient_tolerance: The correction of the gradient is applied only if the
                 norm of the exact gradient at the reference point is below this tolerance, i.e. if
                 the reference is a stationary point. Otherwise, a warning is issued and the
                 gradient is left unchanged. Set it to ``numpy.inf`` to apply the correction
                 regardless.
+            reference_principle: The principle which evaluates the noisy quantities at the
+                reference point, e.g. one with the same circuits and backend as ``principle`` but
+                an estimator with a higher precision, which measures the offsets more precisely in
+                a single evaluation. Its noise, apart from the shot noise, must be that of
+                ``principle``. If ``None``, ``principle`` is used.
 
         Raises:
             ValueError: If ``num_reference_evaluations`` is not positive or if
@@ -127,11 +154,15 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
         self.mitigate_metric = mitigate_metric
         self.num_reference_evaluations = num_reference_evaluations
         self.reference_gradient_tolerance = reference_gradient_tolerance
+        self.reference_principle = reference_principle
         self.gradient_offset: np.ndarray | None = None
         """The offset subtracted from the gradient, i.e. its noise bias at the reference point
         (zero if the reference is not stationary and the correction is disabled)."""
         self.metric_offset: np.ndarray | None = None
         """The offset subtracted from the metric, i.e. its noise bias at the reference point."""
+        self.gradient_offset_error: float | None = None
+        """The norm of the standard error of the gradient offset, estimated from the spread of the
+        reference evaluations (``None`` for a single evaluation)."""
         self.reference_gradient_norm: float | None = None
         """The norm of the exact gradient at the reference point of the last evaluation."""
         self.gradient_correction_active: bool | None = None
@@ -142,12 +173,13 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
     def reset(self) -> None:
         """Discards the offsets, such that they are measured anew."""
         self.gradient_offset = None
+        self.gradient_offset_error = None
         self.metric_offset = None
         self.reference_gradient_norm = None
         self.gradient_correction_active = None
         self._ansatz = None
 
-    def metric_tensor(  # type: ignore[override]
+    def metric_tensor(  # type: ignore[override, unused-ignore]
         self, ansatz: QuantumCircuit, param_values: Sequence[float]
     ) -> np.ndarray:
         self._check_ansatz(ansatz)
@@ -158,7 +190,7 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
             reference = self._reference(ansatz)
             noisy = np.mean(
                 [
-                    np.real(np.asarray(self.principle.metric_tensor(ansatz, reference)))
+                    np.real(np.asarray(self._reference_principle.metric_tensor(ansatz, reference)))
                     for _ in range(self.num_reference_evaluations)
                 ],
                 axis=0,
@@ -218,21 +250,39 @@ class ReferenceStateMitigatedPrinciple(ImaginaryVariationalPrinciple):
             )
             self.gradient_correction_active = False
             return np.zeros_like(exact)
-        noisy = np.mean(
+        evaluations = np.array(
             [
                 np.real(
                     np.asarray(
-                        self.principle.evolution_gradient(
+                        self._reference_principle.evolution_gradient(
                             hamiltonian, ansatz, reference, gradient_params
                         )
                     )
                 )
                 for _ in range(self.num_reference_evaluations)
-            ],
-            axis=0,
+            ]
         )
+        offset = np.mean(evaluations, axis=0) - exact
+        if self.num_reference_evaluations > 1:
+            standard_error = np.std(evaluations, axis=0, ddof=1) / np.sqrt(len(evaluations))
+            self.gradient_offset_error = float(np.linalg.norm(standard_error))
+            if np.linalg.norm(offset) < 3 * self.gradient_offset_error:
+                warnings.warn(
+                    "The measured gradient offset is not significant: its norm "
+                    f"{np.linalg.norm(offset):.2e} is below three times its statistical error "
+                    f"{self.gradient_offset_error:.2e}. Since the offset is subtracted in every "
+                    "step, its error acts as a constant bias of the gradient. Increase "
+                    "num_reference_evaluations, or measure the reference more precisely with a "
+                    "reference_principle.",
+                    UserWarning,
+                    stacklevel=4,
+                )
         self.gradient_correction_active = True
-        return noisy - exact
+        return offset
+
+    @property
+    def _reference_principle(self) -> ImaginaryVariationalPrinciple:
+        return self.reference_principle if self.reference_principle is not None else self.principle
 
     def _check_ansatz(self, ansatz: QuantumCircuit) -> None:
         if ansatz is not self._ansatz:

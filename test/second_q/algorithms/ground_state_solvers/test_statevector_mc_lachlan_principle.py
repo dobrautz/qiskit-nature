@@ -14,9 +14,15 @@
 
 import unittest
 from pathlib import Path
+from unittest import mock
 from test import QiskitNatureTestCase
+from test.second_q.algorithms.ground_state_solvers.qiskit_algorithms_support import (
+    HAS_NON_HERMITIAN_VARQITE,
+    SKIP_VARQITE,
+)
 
 import numpy as np
+import scipy.linalg
 from ddt import data, ddt
 from qiskit import QuantumCircuit
 from qiskit.circuit import ParameterVector
@@ -26,6 +32,7 @@ from qiskit.synthesis import LieTrotter, SuzukiTrotter
 from qiskit_algorithms.gradients import ReverseEstimatorGradient, ReverseQGT
 from qiskit_algorithms.time_evolvers.variational import ImaginaryMcLachlanPrinciple
 
+from qiskit_nature import QiskitNatureError
 from qiskit_nature.second_q.algorithms import (
     StatevectorImaginaryMcLachlanPrinciple,
     VarQITEMinimumEigensolver,
@@ -98,6 +105,10 @@ def mixed_circuit() -> QuantumCircuit:
     return circuit
 
 
+# SparsePauliOp.from_sparse_observable exists from Qiskit 2.0 on
+HAS_SPARSE_OBSERVABLE_CONVERSION = hasattr(SparsePauliOp, "from_sparse_observable")
+
+
 @ddt
 class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
     """Test the StatevectorImaginaryMcLachlanPrinciple."""
@@ -139,6 +150,8 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         np.testing.assert_allclose(gradient, fd_gradient, atol=1e-7)
         if case != "mixed":
             # the reverse-mode gradients of qiskit-algorithms do not support all gates
+            if not HAS_NON_HERMITIAN_VARQITE:
+                self.skipTest(SKIP_VARQITE)
             reference = ImaginaryMcLachlanPrinciple(ReverseQGT(), ReverseEstimatorGradient())
             np.testing.assert_allclose(metric, reference.metric_tensor(ansatz, values), atol=1e-12)
             np.testing.assert_allclose(
@@ -170,12 +183,29 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         reference = StatevectorImaginaryMcLachlanPrinciple().evolution_gradient(
             hamiltonian, ansatz, values
         )
-        for other in (Operator(hamiltonian), SparseObservable.from_sparse_pauli_op(hamiltonian)):
+        others = [Operator(hamiltonian)]
+        if HAS_SPARSE_OBSERVABLE_CONVERSION:
+            others.append(SparseObservable.from_sparse_pauli_op(hamiltonian))
+        for other in others:
             with self.subTest(type(other).__name__):
                 gradient = StatevectorImaginaryMcLachlanPrinciple().evolution_gradient(
                     other, ansatz, values
                 )
                 np.testing.assert_allclose(gradient, reference, atol=1e-12)
+
+    def test_sparse_observable_needs_qiskit_2(self):
+        """Test the error for a SparseObservable Hamiltonian with Qiskit older than 2.0."""
+        ansatz = efficient_su2(2, reps=1)
+        observable = SparseObservable.from_list([("ZZ", 1.0)])
+        with mock.patch(
+            "qiskit_nature.second_q.algorithms.ground_state_solvers.statevector_mc_lachlan_principle."
+            "_HAS_SPARSE_OBSERVABLE_CONVERSION",
+            False,
+        ):
+            with self.assertRaises(QiskitNatureError):
+                StatevectorImaginaryMcLachlanPrinciple().evolution_gradient(
+                    observable, ansatz, np.zeros(ansatz.num_parameters)
+                )
 
     def test_pauli_evolution_variants(self):
         """Test a Suzuki-Trotter synthesized evolution (compiled from its definition), a
@@ -188,7 +218,10 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         circuit.append(
             PauliEvolutionGate(non_commuting, theta[1], synthesis=SuzukiTrotter(order=2)), [0, 1]
         )
-        observable = SparseObservable.from_sparse_pauli_op(SparsePauliOp(["ZZ", "XX"], [0.6, 0.2]))
+        observable = SparsePauliOp(["ZZ", "XX"], [0.6, 0.2])
+        if HAS_SPARSE_OBSERVABLE_CONVERSION:
+            # PauliEvolutionGate accepts a SparseObservable from Qiskit 2.0 on
+            observable = SparseObservable.from_sparse_pauli_op(observable)
         circuit.append(PauliEvolutionGate(observable, theta[2]), [2, 3])
         circuit.append(
             PauliEvolutionGate(SparsePauliOp(["XXXX", "YYXX"], [0.5, 0.25]), 0.3), [0, 1, 2, 3]
@@ -201,9 +234,12 @@ class TestStatevectorImaginaryMcLachlanPrinciple(QiskitNatureTestCase):
         np.testing.assert_allclose(
             state, Statevector(synthesized(circuit).assign_parameters(values)).data, atol=1e-12
         )
-        # the synthesized product differs from the exact exponential of non-commuting terms
-        exact = Statevector(circuit.assign_parameters(values)).data
-        self.assertGreater(np.abs(state - exact).max(), 1e-4)
+        # the synthesized product of the non-commuting terms differs from their exact exponential
+        # (checked on the gate itself: Qiskit 2.x simulates the exact exponential in Statevector,
+        # Qiskit 1.4 the synthesized product)
+        gate = PauliEvolutionGate(non_commuting, values[1], synthesis=SuzukiTrotter(order=2))
+        exact = scipy.linalg.expm(-1j * values[1] * non_commuting.to_matrix())
+        self.assertGreater(np.abs(Operator(gate.definition).data - exact).max(), 1e-4)
         fd_metric, fd_gradient = finite_difference_system(synthesized(circuit), hamiltonian, values)
         np.testing.assert_allclose(principle.metric_tensor(circuit, values), fd_metric, atol=1e-7)
         np.testing.assert_allclose(

@@ -57,6 +57,8 @@ comput
 correlator
 dobrautz
 dtheta
+euler
+exponentials
 fci
 ffsim
 fitzek
@@ -70,9 +72,11 @@ ikr
 izaac
 jastrow
 jonsson
+kats
 killoran
 leftarrow
 leq
+liao
 lincomb
 linearization
 lolur
@@ -90,6 +94,7 @@ multisets
 nabla
 nonunitary
 npy
+osman
 outfile
 phys
 pq
@@ -110,9 +115,11 @@ skogh
 sokolov
 symplectic
 tancredi
+tc
 tcdump
 tchint
 tew
+tikhonov
 timestep
 transcorrelated
 transpiled

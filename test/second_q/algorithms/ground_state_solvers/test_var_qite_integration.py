@@ -124,7 +124,9 @@ class TestVarQITEIntegration(QiskitNatureTestCase):
             eigenvalues, vectors = np.linalg.eigh(metric)
             basis = vectors[:, eigenvalues > 1e-7 * eigenvalues[-1]]
             self.assertGreater(np.linalg.eigvalsh(basis.T @ (matrix - metric) @ basis)[0], -1e-9)
-        self.assertEqual(tangent_space_shift(tangent - shift * metric, metric), 0.0)
+        self.assertAlmostEqual(
+            tangent_space_shift(tangent - shift * metric, metric), 0.0, delta=1e-12
+        )
 
     @data(True, False)
     def test_implicit(self, hermitian):

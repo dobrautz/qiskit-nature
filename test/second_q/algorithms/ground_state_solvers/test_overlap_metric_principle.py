@@ -15,6 +15,10 @@
 import unittest
 from pathlib import Path
 from test import QiskitNatureTestCase
+from test.second_q.algorithms.ground_state_solvers.qiskit_algorithms_support import (
+    HAS_NON_HERMITIAN_VARQITE,
+    SKIP_VARQITE,
+)
 
 import numpy as np
 from ddt import data, ddt
@@ -158,6 +162,7 @@ class TestOverlapMetricPrinciple(QiskitNatureTestCase):
         self.assertEqual(principle.num_circuits(ansatz), 1 + 8 + 2 * 6 * 4)
         self.assertEqual(OverlapMetricPrinciple(self.exact).num_circuits(ansatz), 1 + 8 + 28 * 4)
 
+    @unittest.skipUnless(HAS_NON_HERMITIAN_VARQITE, SKIP_VARQITE)
     def test_var_qite(self):
         """Test the VarQITE with the overlap metric."""
         problem = fcidump_to_problem(FCIDump.from_file(DATA / "h2_sto6g_tc.fcidump"))
